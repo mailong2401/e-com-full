@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_test
+    restart: always
+    environment:
+      POSTGRES_USER: long
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: e-com
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

@@ -1,0 +1,93 @@
+# =========================================
+# Dependencies
+# =========================================
+node_modules/
+.pnp/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# =========================================
+# Build / compiled output
+# =========================================
+dist/
+build/
+.next/
+out/
+
+# =========================================
+# Environment variables
+# =========================================
+.env
+.env.*
+!.env.example
+
+# =========================================
+# Logs
+# =========================================
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# =========================================
+# Tests / coverage
+# =========================================
+coverage/
+.nyc_output/
+
+# =========================================
+# TypeScript
+# =========================================
+*.tsbuildinfo
+next-env.d.ts
+
+# =========================================
+# Temporary / runtime files
+# =========================================
+.temp/
+.tmp/
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Diagnostic reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# =========================================
+# IDE / Editors
+# =========================================
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# =========================================
+# OS
+# =========================================
+.DS_Store
+
+# =========================================
+# Certificates / keys
+# =========================================
+*.pem
+
+# =========================================
+# Vercel
+# =========================================
+.vercel/
