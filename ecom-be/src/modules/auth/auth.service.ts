@@ -6,6 +6,8 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { OtpService } from './services/otp.service';
+import { OtpPurpose } from 'src/common/constants/redis-keys.constant';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
@@ -31,6 +33,7 @@ export class AuthService {
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly otpService: OtpService,
   ) { }
 
   async register(registerDto: RegisterDto): Promise<{
@@ -47,6 +50,56 @@ export class AuthService {
 
     const { password, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, tokens };
+  }
+
+  async verifyRegisterOtp(
+    email: string,
+    otp: string,
+  ): Promise<{ user: Omit<User, 'password'>; tokens: AuthTokens }> {
+    await this.otpService.verifyOtp(email, otp, OtpPurpose.REGISTER);
+
+    const user = await this.userService.findByEmail(email);
+    if (!user) throw new BadRequestException('User không tồn tại');
+
+    // Đánh dấu đã verify (nếu có field isVerified trong entity)
+    // await this.userService.markVerified(user.id);
+
+    const tokens = await this.generateTokens(user);
+    await this.updateRefreshToken(user.id, tokens.refreshToken);
+
+    const { password, ...userWithoutPassword } = user;
+    return { user: userWithoutPassword, tokens };
+  }
+
+  /**
+   * Đăng ký bước 1: Tạo user + gửi OTP
+   * KHÔNG trả token — user phải verify OTP trước
+   */
+  async registerWithOtp(
+    registerDto: RegisterDto,
+  ): Promise<{ message: string }> {
+    const user = await this.userService.create({
+      ...registerDto,
+      role: UserRole.USER,
+    });
+
+    await this.otpService.sendOtp(user.email, OtpPurpose.REGISTER);
+
+    return {
+      message: 'Đăng ký thành công. Vui lòng kiểm tra email để lấy mã OTP.',
+    };
+  }
+  /**
+   * Login 2FA: verify OTP
+   */
+  async sendLoginOtp(email: string): Promise<{ message: string }> {
+    const user = await this.userService.findByEmail(email);
+    if (!user) {
+      // Tránh leak user enumeration → trả message chung
+      return { message: 'Nếu email tồn tại, mã OTP đã được gửi.' };
+    }
+    await this.otpService.sendOtp(email, OtpPurpose.LOGIN_2FA);
+    return { message: 'Nếu email tồn tại, mã OTP đã được gửi.' };
   }
 
   async login(loginDto: LoginDto): Promise<{

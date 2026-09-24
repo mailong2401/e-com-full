@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UserModule } from './modules/user/user.module';
+import { RedisModule } from './infrastructure/redis/redis.module';
+import { MailModule } from './infrastructure/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
@@ -21,6 +23,8 @@ import { AuthModule } from './modules/auth/auth.module';
         synchronize: true,
       }),
     }),
+    RedisModule,
+    MailModule,
     UserModule,
     AuthModule,
   ],

@@ -42,8 +42,23 @@ The content is organized as follows:
 <directory_structure>
 src/
   common/
+    constants/
+      redis-keys.constant.ts
     enums/
       user-role.enum.ts
+    exceptions/
+      too-many-requests.exception.ts
+    interfaces/
+      otp-payload.interface.ts
+  infrastructure/
+    mail/
+      templates/
+        otp-verification.hbs
+      mail.module.ts
+      mail.service.ts
+    redis/
+      redis.module.ts
+      redis.service.ts
   modules/
     auth/
       decorators/
@@ -54,10 +69,14 @@ src/
         login.dto.ts
         refresh-token.dto.ts
         register.dto.ts
+        resend-otp.dto.ts
+        verify-otp.dto.ts
       guards/
         jwt-auth.guard.ts
         jwt-refresh.guard.ts
         roles.guard.ts
+      services/
+        otp.service.ts
       strategies/
         jwt-refresh.strategy.ts
         jwt.strategy.ts
@@ -77,9 +96,9 @@ src/
 test/
   app.e2e-spec.ts
   jest-e2e.json
-.gitignore
 .prettierrc
 docker-compose.yml
+Dockerfile
 eslint.config.mjs
 nest-cli.json
 package.json
@@ -92,10 +111,273 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
+<file path="src/common/constants/redis-keys.constant.ts">
+// src/common/constants/redis-keys.constant.ts
+export const RedisKeys = {
+  OTP: (email: string, purpose: string) => `otp:${purpose}:${email}`,
+  OTP_ATTEMPTS: (email: string, purpose: string) =>
+    `otp:attempts:${purpose}:${email}`,
+  OTP_COOLDOWN: (email: string, purpose: string) =>
+    `otp:cooldown:${purpose}:${email}`,
+  REFRESH_TOKEN_BLACKLIST: (jti: string) => `blacklist:refresh:${jti}`,
+} as const;
+
+export const OtpPurpose = {
+  REGISTER: 'register',
+  FORGOT_PASSWORD: 'forgot_password',
+  LOGIN_2FA: 'login_2fa',
+} as const;
+
+export type OtpPurposeType = (typeof OtpPurpose)[keyof typeof OtpPurpose];
+</file>
+
 <file path="src/common/enums/user-role.enum.ts">
 export enum UserRole {
   USER = 'user',
   ADMIN = 'admin',
+}
+</file>
+
+<file path="src/common/exceptions/too-many-requests.exception.ts">
+// src/common/exceptions/too-many-requests.exception.ts
+import { HttpException, HttpStatus } from '@nestjs/common';
+
+export class TooManyRequestsException extends HttpException {
+  constructor(message: string = 'Too Many Requests') {
+    super(message, HttpStatus.TOO_MANY_REQUESTS); // 429
+  }
+}
+</file>
+
+<file path="src/common/interfaces/otp-payload.interface.ts">
+// src/common/interfaces/otp-payload.interface.ts
+import { OtpPurposeType } from '../constants/redis-keys.constant';
+
+export interface OtpPayload {
+  email: string;
+  otp: string;
+  purpose: OtpPurposeType;
+  createdAt: number;
+}
+</file>
+
+<file path="src/infrastructure/mail/templates/otp-verification.hbs">
+{{! src/infrastructure/mail/templates/otp-verification.hbs }}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+</head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <h2 style="color: #333;">{{purpose}}</h2>
+  <p>Xin chào,</p>
+  <p>Mã OTP của bạn là:</p>
+  <div style="background: #f4f4f4; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
+    <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #2c3e50;">{{otp}}</span>
+  </div>
+  <p>Mã này có hiệu lực trong <strong>{{ttlMinutes}} phút</strong>.</p>
+  <p style="color: #888; font-size: 12px;">Nếu bạn không yêu cầu mã này, vui lòng bỏ qua email.</p>
+  <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+  <p style="color: #888; font-size: 12px;">&copy; {{year}} E-Commerce. All rights reserved.</p>
+</body>
+</html>
+</file>
+
+<file path="src/infrastructure/mail/mail.module.ts">
+// src/infrastructure/mail/mail.module.ts
+import { Global, Module } from '@nestjs/common';
+import { MailerModule } from '@nestjs-modules/mailer';
+import { HandlebarsAdapter } from '@nestjs-modules/mailer/adapters/handlebars.adapter';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { join } from 'path';
+import { MailService } from './mail.service';
+
+@Global()
+@Module({
+  imports: [
+    MailerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        transport: {
+          host: config.get<string>('MAIL_HOST'),
+          port: config.get<number>('MAIL_PORT', 587),
+          secure: config.get<string>('MAIL_SECURE') === 'true',
+          auth: {
+            user: config.get<string>('MAIL_USER'),
+            pass: config.get<string>('MAIL_PASSWORD'),
+          },
+        },
+        defaults: {
+          from: `"${config.get('MAIL_FROM_NAME', 'E-Commerce')}" <${config.get('MAIL_FROM')}>`,
+        },
+        template: {
+          dir: join(__dirname, 'templates'),
+          adapter: new HandlebarsAdapter(),
+          options: { strict: true },
+        },
+      }),
+    }),
+  ],
+  providers: [MailService],
+  exports: [MailService],
+})
+export class MailModule { }
+</file>
+
+<file path="src/infrastructure/mail/mail.service.ts">
+// src/infrastructure/mail/mail.service.ts
+import { Injectable, Logger } from '@nestjs/common';
+import { MailerService } from '@nestjs-modules/mailer';
+
+@Injectable()
+export class MailService {
+  private readonly logger = new Logger(MailService.name);
+
+  constructor(private readonly mailerService: MailerService) { }
+
+  async sendOtpEmail(
+    to: string,
+    otp: string,
+    purpose: string,
+    ttlMinutes = 5,
+  ): Promise<void> {
+    const subjectMap: Record<string, string> = {
+      register: 'Xác thực tài khoản của bạn',
+      forgot_password: 'Đặt lại mật khẩu',
+      login_2fa: 'Mã xác thực đăng nhập',
+    };
+
+    try {
+      await this.mailerService.sendMail({
+        to,
+        subject: subjectMap[purpose] ?? 'Mã xác thực OTP',
+        template: 'otp-verification',
+        context: {
+          otp,
+          purpose: subjectMap[purpose] ?? 'Xác thực',
+          ttlMinutes,
+          year: new Date().getFullYear(),
+        },
+      });
+      this.logger.log(`OTP email sent to ${to} (purpose: ${purpose})`);
+    } catch (error) {
+      this.logger.error(`Failed to send OTP email to ${to}`, error);
+      throw error;
+    }
+  }
+}
+</file>
+
+<file path="src/infrastructure/redis/redis.module.ts">
+// src/infrastructure/redis/redis.module.ts
+import { Global, Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { RedisModule as IORedisModule } from '@nestjs-modules/ioredis';
+import { RedisService } from './redis.service';
+
+@Global()
+@Module({
+  imports: [
+    IORedisModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        type: 'single',
+        options: {
+          host: config.get<string>('REDIS_HOST', 'localhost'),
+          port: config.get<number>('REDIS_PORT', 6379),
+          password: config.get<string>('REDIS_PASSWORD'),
+          db: config.get<number>('REDIS_DB', 0),
+          retryStrategy: (times) => Math.min(times * 50, 2000),
+          maxRetriesPerRequest: 3,
+        },
+      }),
+    }),
+  ],
+  providers: [RedisService],
+  exports: [RedisService],
+})
+export class RedisModule { }
+</file>
+
+<file path="src/infrastructure/redis/redis.service.ts">
+// src/infrastructure/redis/redis.service.ts
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRedis } from '@nestjs-modules/ioredis';
+import Redis from 'ioredis';
+
+@Injectable()
+export class RedisService {
+  private readonly logger = new Logger(RedisService.name);
+
+  constructor(@InjectRedis() private readonly redis: Redis) { }
+
+  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    try {
+      if (ttlSeconds) {
+        await this.redis.setex(key, ttlSeconds, value);
+      } else {
+        await this.redis.set(key, value);
+      }
+    } catch (error) {
+      this.logger.error(`Redis SET failed for key ${key}`, error);
+      throw error;
+    }
+  }
+
+  async get(key: string): Promise<string | null> {
+    return this.redis.get(key);
+  }
+
+  async del(...keys: string[]): Promise<number> {
+    if (keys.length === 0) return 0;
+    return this.redis.del(...keys);
+  }
+
+  async exists(key: string): Promise<boolean> {
+    return (await this.redis.exists(key)) === 1;
+  }
+
+  async incr(key: string): Promise<number> {
+    return this.redis.incr(key);
+  }
+
+  async expire(key: string, ttlSeconds: number): Promise<void> {
+    await this.redis.expire(key, ttlSeconds);
+  }
+
+  async ttl(key: string): Promise<number> {
+    return this.redis.ttl(key);
+  }
+
+  /**
+   * Set giá trị JSON (tiện cho object)
+   */
+  async setJson<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
+    await this.set(key, JSON.stringify(value), ttlSeconds);
+  }
+
+  async getJson<T>(key: string): Promise<T | null> {
+    const raw = await this.get(key);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Atomic increment với TTL nếu là lần đầu
+   */
+  async incrWithTtl(key: string, ttlSeconds: number): Promise<number> {
+    const value = await this.redis.incr(key);
+    if (value === 1) {
+      await this.redis.expire(key, ttlSeconds);
+    }
+    return value;
+  }
 }
 </file>
 
@@ -225,6 +507,44 @@ export class RegisterDto {
 }
 </file>
 
+<file path="src/modules/auth/dto/resend-otp.dto.ts">
+// src/modules/auth/dto/resend-otp.dto.ts
+import { IsEmail, IsIn } from 'class-validator';
+import { Transform } from 'class-transformer';
+import type { OtpPurposeType } from 'src/common/constants/redis-keys.constant';
+
+export class ResendOtpDto {
+  @IsEmail()
+  @Transform(({ value }) => value?.toLowerCase().trim())
+  email!: string;
+
+  @IsIn(['register', 'forgot_password', 'login_2fa'])
+  purpose!: OtpPurposeType;
+}
+</file>
+
+<file path="src/modules/auth/dto/verify-otp.dto.ts">
+// src/modules/auth/dto/verify-otp.dto.ts
+import { IsEmail, IsString, Length, Matches } from 'class-validator';
+import { Transform } from 'class-transformer';
+import type { OtpPurposeType } from 'src/common/constants/redis-keys.constant';
+import { IsIn } from 'class-validator';
+
+export class VerifyOtpDto {
+  @IsEmail()
+  @Transform(({ value }) => value?.toLowerCase().trim())
+  email!: string;
+
+  @IsString()
+  @Length(4, 8)
+  @Matches(/^\d+$/, { message: 'OTP chỉ chứa chữ số' })
+  otp!: string;
+
+  @IsIn(['register', 'forgot_password', 'login_2fa'])
+  purpose!: OtpPurposeType;
+}
+</file>
+
 <file path="src/modules/auth/guards/jwt-auth.guard.ts">
 // src/auth/guards/jwt-auth.guard.ts
 import { Injectable } from '@nestjs/common';
@@ -282,6 +602,169 @@ export class RolesGuard implements CanActivate {
     }
 
     return true;
+  }
+}
+</file>
+
+<file path="src/modules/auth/services/otp.service.ts">
+// src/modules/auth/services/otp.service.ts
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomInt, randomBytes } from 'crypto';
+import { RedisService } from 'src/infrastructure/redis/redis.service';
+import { MailService } from 'src/infrastructure/mail/mail.service';
+import { TooManyRequestsException } from 'src/common/exceptions/too-many-requests.exception';
+import {
+  RedisKeys,
+  OtpPurposeType,
+} from 'src/common/constants/redis-keys.constant';
+import { OtpPayload } from 'src/common/interfaces/otp-payload.interface';
+
+@Injectable()
+export class OtpService {
+  private readonly logger = new Logger(OtpService.name);
+
+  private readonly OTP_LENGTH: number;
+  private readonly OTP_TTL: number; // seconds
+  private readonly MAX_ATTEMPTS: number;
+  private readonly RESEND_COOLDOWN: number; // seconds
+
+  constructor(
+    private readonly redis: RedisService,
+    private readonly mailService: MailService,
+    private readonly config: ConfigService,
+  ) {
+    this.OTP_LENGTH = this.config.get<number>('OTP_LENGTH', 6);
+    this.OTP_TTL = this.config.get<number>('OTP_TTL_SECONDS', 300); // 5 phút
+    this.MAX_ATTEMPTS = this.config.get<number>('OTP_MAX_ATTEMPTS', 5);
+    this.RESEND_COOLDOWN = this.config.get<number>('OTP_RESEND_COOLDOWN', 60);
+  }
+
+  /**
+   * Sinh OTP an toàn bằng crypto.randomInt
+   */
+  private generateOtp(): string {
+    const min = Math.pow(10, this.OTP_LENGTH - 1);
+    const max = Math.pow(10, this.OTP_LENGTH) - 1;
+    return randomInt(min, max + 1).toString();
+  }
+
+  /**
+   * Gửi OTP - có cooldown chống spam
+   */
+  async sendOtp(email: string, purpose: OtpPurposeType): Promise<void> {
+    const cooldownKey = RedisKeys.OTP_COOLDOWN(email, purpose);
+    const isCooldown = await this.redis.exists(cooldownKey);
+    if (isCooldown) {
+      const ttl = await this.redis.ttl(cooldownKey);
+      throw new TooManyRequestsException(
+        `Vui lòng đợi ${ttl} giây trước khi yêu cầu mã mới`,
+      );
+    }
+
+    const otp = this.generateOtp();
+    const payload: OtpPayload = {
+      email,
+      otp,
+      purpose,
+      createdAt: Date.now(),
+    };
+
+    // Lưu OTP vào Redis với TTL
+    await this.redis.setJson(
+      RedisKeys.OTP(email, purpose),
+      payload,
+      this.OTP_TTL,
+    );
+
+    // Reset attempts counter
+    await this.redis.del(RedisKeys.OTP_ATTEMPTS(email, purpose));
+
+    // Set cooldown
+    await this.redis.set(cooldownKey, '1', this.RESEND_COOLDOWN);
+
+    // Gửi mail (không block nếu fail — có thể đẩy vào queue production)
+    await this.mailService.sendOtpEmail(
+      email,
+      otp,
+      purpose,
+      Math.floor(this.OTP_TTL / 60),
+    );
+  }
+
+  /**
+   * Verify OTP — chống brute force bằng attempts counter
+   */
+  async verifyOtp(
+    email: string,
+    otp: string,
+    purpose: OtpPurposeType,
+  ): Promise<boolean> {
+    const otpKey = RedisKeys.OTP(email, purpose);
+    const attemptsKey = RedisKeys.OTP_ATTEMPTS(email, purpose);
+
+    const attempts = await this.redis.incrWithTtl(attemptsKey, this.OTP_TTL);
+    if (attempts > this.MAX_ATTEMPTS) {
+      // Xóa OTP để buộc user yêu cầu mã mới
+      await this.redis.del(otpKey);
+      throw new BadRequestException(
+        'Bạn đã nhập sai quá nhiều lần. Vui lòng yêu cầu mã mới.',
+      );
+    }
+
+    const payload = await this.redis.getJson<OtpPayload>(otpKey);
+    if (!payload) {
+      throw new BadRequestException('Mã OTP đã hết hạn hoặc không tồn tại');
+    }
+
+    if (payload.otp !== otp) {
+      const remaining = this.MAX_ATTEMPTS - attempts;
+      throw new BadRequestException(
+        `Mã OTP không đúng. Còn ${remaining} lần thử.`,
+      );
+    }
+
+    // Thành công → xóa OTP & attempts
+    await this.redis.del(otpKey, attemptsKey);
+    return true;
+  }
+
+  /**
+   * Kiểm tra tồn tại OTP (dùng cho flow register/login)
+   */
+  async isOtpValid(email: string, purpose: OtpPurposeType): Promise<boolean> {
+    return this.redis.exists(RedisKeys.OTP(email, purpose));
+  }
+
+  /**
+   * Dùng cho flow: xác thực OTP ở bước 1 → trả về verification token ngắn hạn
+   * (tránh việc user phải gửi lại OTP ở bước 2)
+   */
+  async issueVerificationToken(
+    email: string,
+    purpose: OtpPurposeType,
+  ): Promise<string> {
+    const token = randomBytes(32).toString('hex');
+    await this.redis.set(
+      `verify:${purpose}:${email}`,
+      token,
+      300, // 5 phút để hoàn tất bước tiếp theo
+    );
+    return token;
+  }
+
+  async consumeVerificationToken(
+    email: string,
+    purpose: OtpPurposeType,
+    token: string,
+  ): Promise<boolean> {
+    const key = `verify:${purpose}:${email}`;
+    const stored = await this.redis.get(key);
+    if (stored && stored === token) {
+      await this.redis.del(key);
+      return true;
+    }
+    return false;
   }
 }
 </file>
@@ -380,10 +863,16 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { User } from '../user/user.entity';
+import { OtpService } from './services/otp.service';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { ResendOtpDto } from './dto/resend-otp.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(
+    private readonly authService: AuthService,
+    private readonly otpService: OtpService,
+  ) { }
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
@@ -422,6 +911,24 @@ export class AuthController {
   async getProfile(@CurrentUser() user: User) {
     return await this.authService.getProfile(user.id);
   }
+  @Post('register/send-otp')
+  @HttpCode(HttpStatus.CREATED)
+  async registerSendOtp(@Body() dto: RegisterDto) {
+    return this.authService.registerWithOtp(dto);
+  }
+
+  @Post('register/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async registerVerifyOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyRegisterOtp(dto.email, dto.otp);
+  }
+
+  @Post('otp/resend')
+  @HttpCode(HttpStatus.OK)
+  async resendOtp(@Body() dto: ResendOtpDto) {
+    await this.otpService.sendOtp(dto.email, dto.purpose);
+    return { message: 'Đã gửi lại mã OTP' };
+  }
 }
 </file>
 
@@ -431,6 +938,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import type { StringValue } from 'ms';
+import { OtpService } from './services/otp.service';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UserModule } from '../user/user.module';
@@ -455,7 +963,7 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, JwtRefreshStrategy],
+  providers: [AuthService, JwtStrategy, JwtRefreshStrategy, OtpService],
   controllers: [AuthController],
   exports: [AuthService],
 })
@@ -471,6 +979,8 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { OtpService } from './services/otp.service';
+import { OtpPurpose } from 'src/common/constants/redis-keys.constant';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
@@ -496,6 +1006,7 @@ export class AuthService {
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly otpService: OtpService,
   ) { }
 
   async register(registerDto: RegisterDto): Promise<{
@@ -512,6 +1023,56 @@ export class AuthService {
 
     const { password, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, tokens };
+  }
+
+  async verifyRegisterOtp(
+    email: string,
+    otp: string,
+  ): Promise<{ user: Omit<User, 'password'>; tokens: AuthTokens }> {
+    await this.otpService.verifyOtp(email, otp, OtpPurpose.REGISTER);
+
+    const user = await this.userService.findByEmail(email);
+    if (!user) throw new BadRequestException('User không tồn tại');
+
+    // Đánh dấu đã verify (nếu có field isVerified trong entity)
+    // await this.userService.markVerified(user.id);
+
+    const tokens = await this.generateTokens(user);
+    await this.updateRefreshToken(user.id, tokens.refreshToken);
+
+    const { password, ...userWithoutPassword } = user;
+    return { user: userWithoutPassword, tokens };
+  }
+
+  /**
+   * Đăng ký bước 1: Tạo user + gửi OTP
+   * KHÔNG trả token — user phải verify OTP trước
+   */
+  async registerWithOtp(
+    registerDto: RegisterDto,
+  ): Promise<{ message: string }> {
+    const user = await this.userService.create({
+      ...registerDto,
+      role: UserRole.USER,
+    });
+
+    await this.otpService.sendOtp(user.email, OtpPurpose.REGISTER);
+
+    return {
+      message: 'Đăng ký thành công. Vui lòng kiểm tra email để lấy mã OTP.',
+    };
+  }
+  /**
+   * Login 2FA: verify OTP
+   */
+  async sendLoginOtp(email: string): Promise<{ message: string }> {
+    const user = await this.userService.findByEmail(email);
+    if (!user) {
+      // Tránh leak user enumeration → trả message chung
+      return { message: 'Nếu email tồn tại, mã OTP đã được gửi.' };
+    }
+    await this.otpService.sendOtp(email, OtpPurpose.LOGIN_2FA);
+    return { message: 'Nếu email tồn tại, mã OTP đã được gửi.' };
   }
 
   async login(loginDto: LoginDto): Promise<{
@@ -888,8 +1449,6 @@ export class UserService {
 
   async create(createUserDto: CreateUserDto): Promise<User> {
     const { email, username, password } = createUserDto;
-
-    // Check email exists
     const existingEmail = await this.userRepository.findOne({
       where: { email },
     });
@@ -897,7 +1456,6 @@ export class UserService {
       throw new ConflictException('Email already exists');
     }
 
-    // Check username exists
     const existingUsername = await this.userRepository.findOne({
       where: { username },
     });
@@ -1029,6 +1587,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UserModule } from './modules/user/user.module';
+import { RedisModule } from './infrastructure/redis/redis.module';
+import { MailModule } from './infrastructure/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
@@ -1048,6 +1608,8 @@ import { AuthModule } from './modules/auth/auth.module';
         synchronize: true,
       }),
     }),
+    RedisModule,
+    MailModule,
     UserModule,
     AuthModule,
   ],
@@ -1059,6 +1621,7 @@ export class AppModule { }
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'; // 1. Import Swagger
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -1074,6 +1637,18 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.enableCors({ origin: true, credentials: true });
 
+  // 2. Cấu hình Swagger
+  const config = new DocumentBuilder()
+    .setTitle('E-Commerce API')
+    .setDescription('Tài liệu API hệ thống E-Commerce')
+    .setVersion('1.0')
+    .addBearerAuth() // Hỗ trợ nút Authorize để test Token
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('docs', app, document); // Đường dẫn sẽ là /api/docs do dính GlobalPrefix 'api'
+
+  // 3. Chạy ứng dụng (mặc định port 3000)
   await app.listen(process.env.PORT ?? 3000);
 }
 bootstrap();
@@ -1123,65 +1698,6 @@ describe('AppController (e2e)', () => {
 }
 </file>
 
-<file path=".gitignore">
-# compiled output
-/dist
-/node_modules
-/build
-
-# Logs
-logs
-*.log
-npm-debug.log*
-pnpm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-
-# OS
-.DS_Store
-
-# Tests
-/coverage
-/.nyc_output
-
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-
-# dotenv environment variable files
-.env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-
-# temp directory
-.temp
-.tmp
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Diagnostic reports (https://nodejs.org/api/report.html)
-report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
-</file>
-
 <file path=".prettierrc">
 {
   "singleQuote": true,
@@ -1190,8 +1706,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 </file>
 
 <file path="docker-compose.yml">
-version: '3.8'
-
+# docker-compose.yml
 services:
   postgres:
     image: postgres:16-alpine
@@ -1206,8 +1721,62 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis_test
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: mailhog_test
+    restart: always
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI
+
 volumes:
   postgres_data:
+  redis_data:
+</file>
+
+<file path="Dockerfile">
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+RUN corepack enable
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+RUN pnpm build
+
+
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+RUN corepack enable
+
+RUN pnpm install --prod --frozen-lockfile
+
+COPY --from=builder /app/dist ./dist
+
+EXPOSE 8080
+
+CMD ["node", "dist/main.js"]
 </file>
 
 <file path="eslint.config.mjs">
@@ -1254,6 +1823,13 @@ export default tseslint.config(
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
+    "assets": [
+      {
+        "include": "infrastructure/mail/templates/**/*",
+        "outDir": "dist/infrastructure/mail"
+      }
+    ],
+    "watchAssets": true,
     "deleteOutDir": true
   }
 }
@@ -1282,6 +1858,8 @@ export default tseslint.config(
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@nestjs-modules/ioredis": "^2.2.2",
+    "@nestjs-modules/mailer": "^2.3.7",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^12.0.0",
     "@nestjs/core": "^11.0.1",
@@ -1289,10 +1867,15 @@ export default tseslint.config(
     "@nestjs/mapped-types": "^12.0.0",
     "@nestjs/passport": "^12.0.0",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/swagger": "^11.4.7",
     "@nestjs/typeorm": "^12.0.1",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "handlebars": "^4.7.9",
+    "ioredis": "^6.0.0",
+    "mailer": "^0.6.7",
+    "nodemailer": "^10.0.10",
     "passport-jwt": "^4.0.1",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
@@ -1309,6 +1892,7 @@ export default tseslint.config(
     "@types/jest": "^30.0.0",
     "@types/ms": "^2.1.0",
     "@types/node": "^24.0.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/supertest": "^7.0.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
@@ -1348,6 +1932,7 @@ export default tseslint.config(
 <file path="pnpm-workspace.yaml">
 allowBuilds:
   '@parcel/watcher': true
+  '@scarf/scarf': true
   bcrypt: true
   unrs-resolver: true
 </file>

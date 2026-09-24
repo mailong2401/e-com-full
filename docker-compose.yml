@@ -1,6 +1,10 @@
 services:
+  # ===========================
+  # Nginx - Reverse Proxy
+  # ===========================
   nginx:
     image: nginx:alpine
+    container_name: nginx
     restart: unless-stopped
     ports:
       - "80:80"
@@ -9,9 +13,15 @@ services:
     depends_on:
       - frontend
       - backend
+    networks:
+      - ecom-network
 
+  # ===========================
+  # PostgreSQL
+  # ===========================
   postgres:
     image: postgres:16-alpine
+    container_name: postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -19,37 +29,126 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ecom-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ===========================
+  # Redis (cho OTP)
+  # ===========================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ecom-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================
+  # Mailhog (SMTP test)
+  # ===========================
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: mailhog
+    restart: unless-stopped
+    ports:
+      - "8025:8025"   # Web UI - mở http://localhost:8025
+      # Không expose 1025 ra ngoài (chỉ backend cần)
+    networks:
+      - ecom-network
+
+  # ===========================
+  # Frontend
+  # ===========================
   frontend:
     build:
       context: ./ecom-fe
+      dockerfile: Dockerfile
+    container_name: frontend
     restart: unless-stopped
     expose:
       - "3000"
+    environment:
+      NODE_ENV: production
     depends_on:
       - backend
+    networks:
+      - ecom-network
 
+  # ===========================
+  # Backend NestJS
+  # ===========================
   backend:
     build:
       context: ./ecom-be
+      dockerfile: Dockerfile
+    container_name: backend
     restart: unless-stopped
     expose:
       - "8080"
     environment:
+      # App
+      NODE_ENV: ${NODE_ENV}
+      PORT: 8080
+
+      # Database
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_DATABASE: ${DB_DATABASE}
 
+      # JWT
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN}
-
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN}
 
+      # Redis
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB}
+
+      # Mail
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT}
+      MAIL_SECURE: ${MAIL_SECURE}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      MAIL_FROM: ${MAIL_FROM}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME}
+
+      # OTP
+      OTP_LENGTH: ${OTP_LENGTH}
+      OTP_TTL_SECONDS: ${OTP_TTL_SECONDS}
+      OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS}
+      OTP_RESEND_COOLDOWN: ${OTP_RESEND_COOLDOWN}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    networks:
+      - ecom-network
+
+networks:
+  ecom-network:
+    driver: bridge
 
 volumes:
   postgres_data:
+  redis_data:
