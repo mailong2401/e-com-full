@@ -1,0 +1,881 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  (auth)/
+    login/
+      page.tsx
+    register/
+      page.tsx
+  favicon.ico
+  globals.css
+  layout.tsx
+  page.tsx
+hooks/
+  useAuth.ts
+lib/
+  api.ts
+  auth.ts
+public/
+  file.svg
+  globe.svg
+  next.svg
+  vercel.svg
+  window.svg
+Dockerfile
+eslint.config.mjs
+middleware.ts
+next.config.ts
+package.json
+pnpm-workspace.yaml
+postcss.config.mjs
+README.md
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/(auth)/login/page.tsx">
+'use client'
+import React, { useState } from 'react';
+import {
+  Box,
+  Card,
+  Flex,
+  Heading,
+  Text,
+  TextField,
+  Button,
+  Link,
+  Checkbox
+} from '@radix-ui/themes';
+import { EnvelopeClosedIcon, LockClosedIcon } from '@radix-ui/react-icons';
+
+export default function LoginPage() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log({ email, password });
+  };
+
+  return (
+    <Flex
+      align="center"
+      justify="center"
+      style={{ minHeight: '100vh', backgroundColor: 'var(--gray-2)' }}
+    >
+      <Box width="100%" maxWidth="400px" p="4">
+        <Flex direction="column" align="center" mb="5">
+          <Heading size="6" weight="bold" mb="1">
+            Chào mừng trở lại!
+          </Heading>
+          <Text size="2" color="gray">
+            Đăng nhập vào hệ thống quản lý của bạn
+          </Text>
+        </Flex>
+
+        <Card size="4">
+          <form onSubmit={handleSubmit}>
+            <Flex direction="column" gap="4">
+
+              {/* Ô nhập Email */}
+              <Box>
+                <Text as="label" size="2" weight="bold" mb="1">
+                  Email
+                </Text>
+                <TextField.Root
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  size="3"
+                >
+                  <TextField.Slot>
+                    <EnvelopeClosedIcon height="16" width="16" />
+                  </TextField.Slot>
+                </TextField.Root>
+              </Box>
+
+              {/* Ô nhập Mật khẩu */}
+              <Box>
+                <Flex justify="between" align="center" mb="1">
+                  <Text as="label" size="2" weight="bold">
+                    Mật khẩu
+                  </Text>
+                  <Link href="#" size="2">Quên mật khẩu?</Link>
+                </Flex>
+                <TextField.Root
+                  type="password"
+                  placeholder="Nhập mật khẩu của bạn"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  size="3"
+                >
+                  <TextField.Slot>
+                    <LockClosedIcon height="16" width="16" />
+                  </TextField.Slot>
+                </TextField.Root>
+              </Box>
+
+              {/* Ghi nhớ đăng nhập */}
+              <Flex align="center" gap="2">
+                <Checkbox defaultChecked />
+                <Text size="2">Ghi nhớ đăng nhập</Text>
+              </Flex>
+
+              {/* Nút Submit */}
+              <Button size="3" variant="solid" type="submit" style={{ width: '100%', cursor: 'pointer' }}>
+                Đăng nhập
+              </Button>
+              <Button size="3" type="submit" variant="outline" style={{ cursor: 'pointer' }}>
+                Dang ky
+              </Button>
+
+
+            </Flex>
+          </form>
+        </Card>
+
+        {/* Chân trang đăng ký */}
+        <Flex justify="center" mt="4" gap="1">
+          <Text size="2" color="gray">Chưa có tài khoản?</Text>
+          <Link href="#" size="2" weight="bold">Đăng ký ngay</Link>
+        </Flex>
+
+      </Box>
+    </Flex>
+  );
+}
+</file>
+
+<file path="app/(auth)/register/page.tsx">
+'use client'
+import { Box, Card, Flex, Heading, Text, TextField, Button } from "@radix-ui/themes";
+import { useState } from "react";
+import { User, Mail, Phone, Lock } from "lucide-react";
+
+export default function RegisterPage() {
+  const [firstname, setFirstname] = useState('');
+  const [lastname, setLastname] = useState('');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log({ firstname, lastname, username, email, phone, password });
+    // Gói dữ liệu này để gửi sang API NestJS của bạn
+  };
+
+  return (
+    <Flex
+      align="center"
+      justify="center"
+      style={{ minHeight: '100vh', backgroundColor: 'var(--gray-2)', padding: '24px 0' }}
+    >
+      <Box width="100%" maxWidth="480px" p="4">
+        <Flex direction="column" align="center" mb="4">
+          <Heading size="6" weight="bold" mb="1">
+            Tạo tài khoản mới
+          </Heading>
+          <Text size="2" color="gray">
+            Đăng ký để bắt đầu quản lý hệ thống của bạn
+          </Text>
+        </Flex>
+
+        <Card size="4">
+          <form onSubmit={handleSubmit}>
+            <Flex direction="column" gap="3">
+
+              {/* Họ và Tên */}
+              <Flex direction="row" gap="3">
+                <Box style={{ flex: 1 }}>
+                  <Text as="label" size="2" weight="bold" mb="1">
+                    First Name
+                  </Text>
+                  <TextField.Root
+                    placeholder="First name..."
+                    value={firstname}
+                    onChange={(e) => setFirstname(e.target.value)}
+                  >
+                    <TextField.Slot>
+                      <User height="16" width="16" />
+                    </TextField.Slot>
+                  </TextField.Root>
+                </Box>
+
+                <Box style={{ flex: 1 }}>
+                  <Text as="label" size="2" weight="bold" mb="1">
+                    Last Name
+                  </Text>
+                  <TextField.Root
+                    placeholder="Last name..."
+                    value={lastname}
+                    onChange={(e) => setLastname(e.target.value)}
+                  >
+                    <TextField.Slot>
+                      <User height="16" width="16" />
+                    </TextField.Slot>
+                  </TextField.Root>
+                </Box>
+              </Flex>
+
+              {/* Username */}
+              <Box>
+                <Text as="label" size="2" weight="bold" mb="1">
+                  Username
+                </Text>
+                <TextField.Root
+                  placeholder="Username..."
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                >
+                  <TextField.Slot>
+                    <User height="16" width="16" />
+                  </TextField.Slot>
+                </TextField.Root>
+              </Box>
+
+              {/* Email */}
+              <Box>
+                <Text as="label" size="2" weight="bold" mb="1" >
+                  Email
+                </Text>
+                <TextField.Root
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                >
+                  <TextField.Slot>
+                    <Mail height="16" width="16" />
+                  </TextField.Slot>
+                </TextField.Root>
+              </Box>
+
+              {/* Phone */}
+              <Box>
+                <Text as="label" size="2" weight="bold" mb="1">
+                  Phone
+                </Text>
+                <TextField.Root
+                  type="tel"
+                  placeholder="Phone number..."
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                >
+                  <TextField.Slot>
+                    <Phone height="16" width="16" />
+                  </TextField.Slot>
+                </TextField.Root>
+              </Box>
+
+              {/* Password */}
+              <Box>
+                <Text as="label" size="2" weight="bold" mb="1">
+                  Password
+                </Text>
+                <TextField.Root
+                  type="password"
+                  placeholder="Password..."
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                >
+                  <TextField.Slot>
+                    <Lock height="16" width="16" />
+                  </TextField.Slot>
+                </TextField.Root>
+              </Box>
+
+              {/* Nút Submit */}
+              <Button size="3" variant="solid" type="submit" style={{ width: '100%', marginTop: '12px', cursor: 'pointer' }}>
+                Đăng ký
+              </Button>
+
+            </Flex>
+          </form>
+        </Card>
+      </Box>
+    </Flex>
+  );
+}
+</file>
+
+<file path="app/globals.css">
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+</file>
+
+<file path="app/layout.tsx">
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import '@radix-ui/themes/styles.css';
+import { Theme } from '@radix-ui/themes';
+import "./globals.css";
+
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html lang="vi">
+      <body>
+        <Theme accentColor="teal" radius="full">
+          {children}
+        </Theme>
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="app/page.tsx">
+import Image from "next/image";
+
+export default function Home() {
+  return (
+    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
+        <Image
+          className="dark:invert h-5 w-[100px]"
+          src="/next.svg"
+          alt="Next.js logo"
+          width={100}
+          height={20}
+          priority
+        />
+        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
+          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
+            To get started, edit the{" "}
+            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
+              page.tsx
+            </code>{" "}
+            file.
+          </h1>
+          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
+            Looking for a starting point or more instructions? Head over to{" "}
+            <a
+              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+              className="font-medium text-zinc-950 dark:text-zinc-50"
+            >
+              Templates
+            </a>{" "}
+            or the{" "}
+            <a
+              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+              className="font-medium text-zinc-950 dark:text-zinc-50"
+            >
+              Learning
+            </a>{" "}
+            center.
+          </p>
+        </div>
+        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
+          <a
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
+            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Image
+              className="dark:invert h-[14px] w-4"
+              src="/vercel.svg"
+              alt="Vercel logomark"
+              width={16}
+              height={14}
+            />
+            Deploy Now
+          </a>
+          <a
+            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
+            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Documentation
+          </a>
+        </div>
+      </main>
+    </div>
+  );
+}
+</file>
+
+<file path="hooks/useAuth.ts">
+
+</file>
+
+<file path="lib/api.ts">
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+
+export const api = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL, // http://localhost:8080/api
+  headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
+});
+
+// Request interceptor: gắn accessToken
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('accessToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+// Response interceptor: tự động refresh khi 401
+let isRefreshing = false;
+let queue: Array<(token: string) => void> = [];
+
+api.interceptors.response.use(
+  (res) => res,
+  async (error: AxiosError) => {
+    const original = error.config as InternalAxiosRequestConfig & {
+      _retry?: boolean;
+    };
+
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true;
+      const refreshToken = localStorage.getItem('refreshToken');
+
+      if (!refreshToken) {
+        window.location.href = '/login';
+        return Promise.reject(error);
+      }
+
+      if (isRefreshing) {
+        return new Promise((resolve) => {
+          queue.push((token) => {
+            original.headers.Authorization = `Bearer ${token}`;
+            resolve(api(original));
+          });
+        });
+      }
+
+      isRefreshing = true;
+      try {
+        const { data } = await axios.post(
+          `${process.env.NEXT_PUBLIC_API_URL}/auth/refresh`,
+          { refreshToken },
+        );
+        localStorage.setItem('accessToken', data.accessToken);
+        localStorage.setItem('refreshToken', data.refreshToken);
+
+        queue.forEach((cb) => cb(data.accessToken));
+        queue = [];
+
+        original.headers.Authorization = `Bearer ${data.accessToken}`;
+        return api(original);
+      } catch (err) {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        window.location.href = '/login';
+        return Promise.reject(err);
+      } finally {
+        isRefreshing = false;
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
+</file>
+
+<file path="lib/auth.ts">
+import { api } from './api';
+
+export interface RegisterPayload {
+  firstName: string;
+  lastName: string;
+  email: string;
+  username: string;
+  password: string;
+  phone?: string;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface User {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  username: string;
+  role: 'user' | 'admin';
+  avatar?: string | null;
+}
+
+export const authService = {
+  // Bước 1: gửi OTP đăng ký
+  register: async (payload: RegisterPayload) => {
+    const { data } = await api.post<{ message: string }>(
+      '/auth/register/send-otp',
+      payload,
+    );
+    return data;
+  },
+
+  // Bước 2: verify OTP
+  verifyRegisterOtp: async (email: string, otp: string) => {
+    const { data } = await api.post<{ user: User; tokens: AuthTokens }>(
+      '/auth/register/verify-otp',
+      { email, otp, purpose: 'register' },
+    );
+    return data;
+  },
+
+  // Resend OTP
+  resendOtp: async (email: string, purpose: string) => {
+    const { data } = await api.post<{ message: string }>('/auth/otp/resend', {
+      email,
+      purpose,
+    });
+    return data;
+  },
+
+  // Login
+  login: async (payload: LoginPayload) => {
+    const { data } = await api.post<{ user: User; tokens: AuthTokens }>(
+      '/auth/login',
+      payload,
+    );
+    return data;
+  },
+
+  // Logout
+  logout: async () => {
+    try {
+      await api.post('/auth/logout');
+    } finally {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+    }
+  },
+
+  // Profile
+  getProfile: async () => {
+    const { data } = await api.get<User>('/auth/profile');
+    return data;
+  },
+
+  // Helper lưu tokens
+  saveTokens: (tokens: AuthTokens) => {
+    localStorage.setItem('accessToken', tokens.accessToken);
+    localStorage.setItem('refreshToken', tokens.refreshToken);
+  },
+
+  getAccessToken: () =>
+    typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null,
+
+  isAuthenticated: () =>
+    typeof window !== 'undefined' && !!localStorage.getItem('accessToken'),
+};
+</file>
+
+<file path="public/file.svg">
+<svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
+</file>
+
+<file path="public/globe.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><g clip-path="url(#a)"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.27 14.1a6.5 6.5 0 0 0 3.67-3.45q-1.24.21-2.7.34-.31 1.83-.97 3.1M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m.48-1.52a7 7 0 0 1-.96 0H7.5a4 4 0 0 1-.84-1.32q-.38-.89-.63-2.08a40 40 0 0 0 3.92 0q-.25 1.2-.63 2.08a4 4 0 0 1-.84 1.31zm2.94-4.76q1.66-.15 2.95-.43a7 7 0 0 0 0-2.58q-1.3-.27-2.95-.43a18 18 0 0 1 0 3.44m-1.27-3.54a17 17 0 0 1 0 3.64 39 39 0 0 1-4.3 0 17 17 0 0 1 0-3.64 39 39 0 0 1 4.3 0m1.1-1.17q1.45.13 2.69.34a6.5 6.5 0 0 0-3.67-3.44q.65 1.26.98 3.1M8.48 1.5l.01.02q.41.37.84 1.31.38.89.63 2.08a40 40 0 0 0-3.92 0q.25-1.2.63-2.08a4 4 0 0 1 .85-1.32 7 7 0 0 1 .96 0m-2.75.4a6.5 6.5 0 0 0-3.67 3.44 29 29 0 0 1 2.7-.34q.31-1.83.97-3.1M4.58 6.28q-1.66.16-2.95.43a7 7 0 0 0 0 2.58q1.3.27 2.95.43a18 18 0 0 1 0-3.44m.17 4.71q-1.45-.12-2.69-.34a6.5 6.5 0 0 0 3.67 3.44q-.65-1.27-.98-3.1" fill="#666"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h16v16H0z"/></clipPath></defs></svg>
+</file>
+
+<file path="public/next.svg">
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 394 80"><path fill="#000" d="M262 0h68.5v12.7h-27.2v66.6h-13.6V12.7H262V0ZM149 0v12.7H94v20.4h44.3v12.6H94v21h55v12.6H80.5V0h68.7zm34.3 0h-17.8l63.8 79.4h17.9l-32-39.7 32-39.6h-17.9l-23 28.6-23-28.6zm18.3 56.7-9-11-27.1 33.7h17.8l18.3-22.7z"/><path fill="#000" d="M81 79.3 17 0H0v79.3h13.6V17l50.2 62.3H81Zm252.6-.4c-1 0-1.8-.4-2.5-1s-1.1-1.6-1.1-2.6.3-1.8 1-2.5 1.6-1 2.6-1 1.8.3 2.5 1a3.4 3.4 0 0 1 .6 4.3 3.7 3.7 0 0 1-3 1.8zm23.2-33.5h6v23.3c0 2.1-.4 4-1.3 5.5a9.1 9.1 0 0 1-3.8 3.5c-1.6.8-3.5 1.3-5.7 1.3-2 0-3.7-.4-5.3-1s-2.8-1.8-3.7-3.2c-.9-1.3-1.4-3-1.4-5h6c.1.8.3 1.6.7 2.2s1 1.2 1.6 1.5c.7.4 1.5.5 2.4.5 1 0 1.8-.2 2.4-.6a4 4 0 0 0 1.6-1.8c.3-.8.5-1.8.5-3V45.5zm30.9 9.1a4.4 4.4 0 0 0-2-3.3 7.5 7.5 0 0 0-4.3-1.1c-1.3 0-2.4.2-3.3.5-.9.4-1.6 1-2 1.6a3.5 3.5 0 0 0-.3 4c.3.5.7.9 1.3 1.2l1.8 1 2 .5 3.2.8c1.3.3 2.5.7 3.7 1.2a13 13 0 0 1 3.2 1.8 8.1 8.1 0 0 1 3 6.5c0 2-.5 3.7-1.5 5.1a10 10 0 0 1-4.4 3.5c-1.8.8-4.1 1.2-6.8 1.2-2.6 0-4.9-.4-6.8-1.2-2-.8-3.4-2-4.5-3.5a10 10 0 0 1-1.7-5.6h6a5 5 0 0 0 3.5 4.6c1 .4 2.2.6 3.4.6 1.3 0 2.5-.2 3.5-.6 1-.4 1.8-1 2.4-1.7a4 4 0 0 0 .8-2.4c0-.9-.2-1.6-.7-2.2a11 11 0 0 0-2.1-1.4l-3.2-1-3.8-1c-2.8-.7-5-1.7-6.6-3.2a7.2 7.2 0 0 1-2.4-5.7 8 8 0 0 1 1.7-5 10 10 0 0 1 4.3-3.5c2-.8 4-1.2 6.4-1.2 2.3 0 4.4.4 6.2 1.2 1.8.8 3.2 2 4.3 3.4 1 1.4 1.5 3 1.5 5h-5.8z"/></svg>
+</file>
+
+<file path="public/vercel.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1155 1000"><path d="m577.3 0 577.4 1000H0z" fill="#fff"/></svg>
+</file>
+
+<file path="public/window.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.5 2.5h13v10a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1zM0 1h16v11.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 0 12.5zm3.75 4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5M7 4.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0m1.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5" fill="#666"/></svg>
+</file>
+
+<file path="Dockerfile">
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+RUN corepack enable
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+RUN pnpm build
+
+
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+RUN corepack enable
+
+RUN pnpm install --prod --frozen-lockfile
+
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+
+EXPOSE 3000
+
+CMD ["pnpm", "start"]
+</file>
+
+<file path="eslint.config.mjs">
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+  ]),
+]);
+
+export default eslintConfig;
+</file>
+
+<file path="middleware.ts">
+
+</file>
+
+<file path="next.config.ts">
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+</file>
+
+<file path="package.json">
+{
+  "name": "ecom-fe",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@radix-ui/react-icons": "^1.3.2",
+    "@radix-ui/themes": "^3.3.0",
+    "lucide-react": "^1.47.0",
+    "next": "16.3.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+</file>
+
+<file path="pnpm-workspace.yaml">
+allowBuilds:
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@next/env@16.3.6'
+  - '@next/eslint-plugin-next@16.3.6'
+  - '@next/swc-darwin-arm64@16.3.6'
+  - '@next/swc-darwin-x64@16.3.6'
+  - '@next/swc-linux-arm64-gnu@16.3.6'
+  - '@next/swc-linux-arm64-musl@16.3.6'
+  - '@next/swc-linux-x64-gnu@16.3.6'
+  - '@next/swc-linux-x64-musl@16.3.6'
+  - '@next/swc-win32-arm64-msvc@16.3.6'
+  - '@next/swc-win32-x64-msvc@16.3.6'
+  - eslint-config-next@16.3.6
+  - next@16.3.6
+</file>
+
+<file path="postcss.config.mjs">
+const config = {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
+
+export default config;
+</file>
+
+<file path="README.md">
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Getting Started
+
+First, run the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+</file>
+
+</files>

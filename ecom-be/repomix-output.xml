@@ -96,6 +96,7 @@ src/
 test/
   app.e2e-spec.ts
   jest-e2e.json
+.env.example
 .prettierrc
 docker-compose.yml
 Dockerfile
@@ -198,25 +199,43 @@ import { MailService } from './mail.service';
     MailerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        transport: {
-          host: config.get<string>('MAIL_HOST'),
-          port: config.get<number>('MAIL_PORT', 587),
+      useFactory: (config: ConfigService) => {
+        const isDev = config.get('NODE_ENV') !== 'production';
+        const mailHost = config.get<string>('MAIL_HOST', 'localhost');
+        const mailPort = config.get<number>('MAIL_PORT', isDev ? 1025 : 587);
+        const user = config.get<string>('MAIL_USER');
+        const pass = config.get<string>('MAIL_PASSWORD');
+
+        // Dev + Mailhog: không cần auth, không cần TLS
+        const isMailhog = mailHost === 'localhost' && mailPort === 1025;
+
+        const transport: any = {
+          host: mailHost,
+          port: mailPort,
           secure: config.get<string>('MAIL_SECURE') === 'true',
-          auth: {
-            user: config.get<string>('MAIL_USER'),
-            pass: config.get<string>('MAIL_PASSWORD'),
+        };
+
+        if (!isMailhog && user && pass) {
+          transport.auth = { user, pass };
+        }
+
+        if (isMailhog) {
+          transport.tls = { rejectUnauthorized: false };
+          transport.ignoreTLS = true;
+        }
+
+        return {
+          transport,
+          defaults: {
+            from: `"${config.get('MAIL_FROM_NAME', 'E-Commerce')}" <${config.get('MAIL_FROM', 'noreply@ecommerce.local')}>`,
           },
-        },
-        defaults: {
-          from: `"${config.get('MAIL_FROM_NAME', 'E-Commerce')}" <${config.get('MAIL_FROM')}>`,
-        },
-        template: {
-          dir: join(__dirname, 'templates'),
-          adapter: new HandlebarsAdapter(),
-          options: { strict: true },
-        },
-      }),
+          template: {
+            dir: join(__dirname, 'templates'),
+            adapter: new HandlebarsAdapter(),
+            options: { strict: true },
+          },
+        };
+      },
     }),
   ],
   providers: [MailService],
@@ -1698,6 +1717,63 @@ describe('AppController (e2e)', () => {
 }
 </file>
 
+<file path=".env.example">
+# ===========================
+# App
+# ===========================
+NODE_ENV=development
+BACKEND_PORT=8080
+
+# ===========================
+# PostgreSQL
+# ===========================
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=admin
+POSTGRES_DB=ecommerce
+
+# Dùng cho backend (trong Docker network → service name)
+DB_HOST=postgres
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=admin
+DB_DATABASE=ecommerce
+
+# ===========================
+# JWT
+# ===========================
+JWT_ACCESS_SECRET=TU82lUpl1ZmeLTJVz7ZM3w55iD2mYbXL6Mk7LDmagScjB3dZNMeHvjIxEZf7vtWZ
+JWT_ACCESS_EXPIRES_IN=15m
+JWT_REFRESH_SECRET=ZCmsftMtgk6ABgfPhhMramJzjZCEDLTvHMhM4+klEb9q1n8D4sZ/qbNlM+uPwYTM
+JWT_REFRESH_EXPIRES_IN=7d
+
+# ===========================
+# Redis (service name trong Docker)
+# ===========================
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=redis123
+REDIS_DB=0
+
+# ===========================
+# Mail (Mailhog trong Docker → service name)
+# ===========================
+MAIL_HOST=mailhog
+MAIL_PORT=1025
+MAIL_SECURE=false
+MAIL_USER=
+MAIL_PASSWORD=
+MAIL_FROM=noreply@ecommerce.local
+MAIL_FROM_NAME=E-Commerce
+
+# ===========================
+# OTP
+# ===========================
+OTP_LENGTH=6
+OTP_TTL_SECONDS=300
+OTP_MAX_ATTEMPTS=5
+OTP_RESEND_COOLDOWN=60
+</file>
+
 <file path=".prettierrc">
 {
   "singleQuote": true,
@@ -1826,10 +1902,9 @@ export default tseslint.config(
     "assets": [
       {
         "include": "infrastructure/mail/templates/**/*",
-        "outDir": "dist/infrastructure/mail"
+        "watchAssets": true
       }
     ],
-    "watchAssets": true,
     "deleteOutDir": true
   }
 }
