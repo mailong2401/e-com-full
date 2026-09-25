@@ -74,4 +74,33 @@ export class RedisService {
     }
     return value;
   }
+  // src/infrastructure/redis/redis.service.ts
+
+  /**
+   * Tìm tất cả key theo pattern (dùng KEYS — chỉ dùng cho tập key nhỏ)
+   * Production nên dùng scanKeys() để tránh block Redis
+   */
+  async keys(pattern: string): Promise<string[]> {
+    return this.redis.keys(pattern);
+  }
+
+  /**
+   * Scan an toàn cho production — không block Redis
+   */
+  async scanKeys(pattern: string, count = 100): Promise<string[]> {
+    const found: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await this.redis.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        count,
+      );
+      cursor = nextCursor;
+      found.push(...batch);
+    } while (cursor !== '0');
+    return found;
+  }
 }

@@ -33,15 +33,6 @@ export class User {
   })
   password!: string;
 
-  @Column({
-    name: 'refresh_token',
-    type: 'varchar',
-    length: 255,
-    nullable: true,
-    select: false,
-  })
-  refreshToken!: string | null;
-
   @Column({ name: 'phone', type: 'varchar', length: 20, nullable: true })
   phone!: string | null;
 

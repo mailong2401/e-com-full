@@ -45,13 +45,6 @@ export class UserService {
     return await this.userRepository.save(user);
   }
 
-  async findByIdWithRefreshToken(id: string): Promise<User | null> {
-    return await this.userRepository
-      .createQueryBuilder('user')
-      .addSelect('user.refreshToken')
-      .where('user.id = :id', { id })
-      .getOne();
-  }
   async findAll(): Promise<User[]> {
     return await this.userRepository.find({
       select: {
@@ -124,18 +117,6 @@ export class UserService {
   async remove(id: string): Promise<void> {
     const user = await this.findOne(id);
     await this.userRepository.remove(user);
-  }
-
-  async updateRefreshToken(
-    userId: string,
-    refreshToken: string | null,
-  ): Promise<void> {
-    const hashedToken = refreshToken
-      ? await bcrypt.hash(refreshToken, 10)
-      : null;
-    await this.userRepository.update(userId, {
-      refreshToken: hashedToken,
-    });
   }
 
   async validatePassword(

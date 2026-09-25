@@ -1,15 +1,19 @@
-// src/auth/auth.service.ts
+// src/modules/auth/auth.service.ts
 import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { OtpService } from './services/otp.service';
-import { OtpPurpose } from 'src/common/constants/redis-keys.constant';
 import { ConfigService } from '@nestjs/config';
+import { Response } from 'express';
 import * as bcrypt from 'bcrypt';
+
+import { OtpService } from './services/otp.service';
+import { SessionService, SessionData } from './services/session.service';
+import { OtpPurpose } from 'src/common/constants/redis-keys.constant';
 import { UserService } from '../user/user.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -22,59 +26,50 @@ export interface TokenPayload {
   role: UserRole;
 }
 
-export interface AuthTokens {
+/**
+ * Chỉ còn access token — refresh token đi qua httpOnly cookie
+ */
+export interface AuthResponse {
+  user: Omit<User, 'password'>;
   accessToken: string;
-  refreshToken: string;
+}
+
+export interface RefreshResponse {
+  accessToken: string;
 }
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
+  private readonly REFRESH_COOKIE_NAME = 'refreshToken';
+  private readonly DEVICE_COOKIE_NAME = 'deviceId';
+  private readonly REFRESH_COOKIE_PATH = '/api/auth';
+  private readonly REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 ngày
+
   constructor(
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly otpService: OtpService,
+    private readonly sessionService: SessionService,
   ) { }
 
-  async register(registerDto: RegisterDto): Promise<{
-    user: Omit<User, 'password'>;
-    tokens: AuthTokens;
-  }> {
+  async register(
+    registerDto: RegisterDto,
+    deviceId: string,
+    userAgent: string,
+    ip: string,
+    res: Response,
+  ): Promise<AuthResponse> {
     const user = await this.userService.create({
       ...registerDto,
       role: UserRole.USER,
     });
 
-    const tokens = await this.generateTokens(user);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
-
-    const { password, ...userWithoutPassword } = user;
-    return { user: userWithoutPassword, tokens };
+    return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
   }
 
-  async verifyRegisterOtp(
-    email: string,
-    otp: string,
-  ): Promise<{ user: Omit<User, 'password'>; tokens: AuthTokens }> {
-    await this.otpService.verifyOtp(email, otp, OtpPurpose.REGISTER);
-
-    const user = await this.userService.findByEmail(email);
-    if (!user) throw new BadRequestException('User không tồn tại');
-
-    // Đánh dấu đã verify (nếu có field isVerified trong entity)
-    // await this.userService.markVerified(user.id);
-
-    const tokens = await this.generateTokens(user);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
-
-    const { password, ...userWithoutPassword } = user;
-    return { user: userWithoutPassword, tokens };
-  }
-
-  /**
-   * Đăng ký bước 1: Tạo user + gửi OTP
-   * KHÔNG trả token — user phải verify OTP trước
-   */
   async registerWithOtp(
     registerDto: RegisterDto,
   ): Promise<{ message: string }> {
@@ -89,23 +84,29 @@ export class AuthService {
       message: 'Đăng ký thành công. Vui lòng kiểm tra email để lấy mã OTP.',
     };
   }
-  /**
-   * Login 2FA: verify OTP
-   */
-  async sendLoginOtp(email: string): Promise<{ message: string }> {
-    const user = await this.userService.findByEmail(email);
-    if (!user) {
-      // Tránh leak user enumeration → trả message chung
-      return { message: 'Nếu email tồn tại, mã OTP đã được gửi.' };
-    }
-    await this.otpService.sendOtp(email, OtpPurpose.LOGIN_2FA);
-    return { message: 'Nếu email tồn tại, mã OTP đã được gửi.' };
-  }
 
-  async login(loginDto: LoginDto): Promise<{
-    user: Omit<User, 'password'>;
-    tokens: AuthTokens;
-  }> {
+  async verifyRegisterOtp(
+    email: string,
+    otp: string,
+    deviceId: string,
+    userAgent: string,
+    ip: string,
+    res: Response,
+  ): Promise<AuthResponse> {
+    await this.otpService.verifyOtp(email, otp, OtpPurpose.REGISTER);
+
+    const user = await this.userService.findByEmail(email);
+    if (!user) throw new BadRequestException('User không tồn tại');
+
+    return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
+  }
+  async login(
+    loginDto: LoginDto,
+    deviceId: string,
+    userAgent: string,
+    ip: string,
+    res: Response,
+  ): Promise<AuthResponse> {
     const user = await this.userService.findByEmailWithPassword(loginDto.email);
 
     if (!user || !user.password) {
@@ -121,99 +122,188 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const tokens = await this.generateTokens(user);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
-
-    const { password, ...userWithoutPassword } = user;
-    return { user: userWithoutPassword, tokens };
+    return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
   }
 
-  async logout(userId: string): Promise<{ message: string }> {
-    await this.updateRefreshToken(userId, null);
-    return { message: 'Logged out successfully' };
+  /**
+   * Gửi OTP đăng nhập 2FA (nếu bật)
+   */
+  async sendLoginOtp(email: string): Promise<{ message: string }> {
+    const user = await this.userService.findByEmail(email);
+    const genericMessage = 'Nếu email tồn tại, mã OTP đã được gửi.';
+
+    if (!user) {
+      // Tránh leak user enumeration
+      return { message: genericMessage };
+    }
+
+    await this.otpService.sendOtp(email, OtpPurpose.LOGIN_2FA);
+    return { message: genericMessage };
   }
 
   async refreshTokens(
     userId: string,
-    refreshToken: string,
-  ): Promise<AuthTokens> {
-    const user = await this.userService.findByIdWithRefreshToken(userId);
+    deviceId: string,
+    refreshTokenFromCookie: string,
+    userAgent: string,
+    ip: string,
+    res: Response,
+  ): Promise<RefreshResponse> {
+    // 1. Verify với hash trong session
+    const isValid = await this.sessionService.verifyRefreshToken(
+      userId,
+      deviceId,
+      refreshTokenFromCookie,
+    );
 
-    if (!user || !user.refreshToken) {
-      throw new ForbiddenException('Access denied');
-    }
-
-    const isValid = await bcrypt.compare(refreshToken, user.refreshToken);
     if (!isValid) {
-      // Token reuse detected → revoke all sessions
-      await this.userService.updateRefreshToken(userId, null);
-      throw new ForbiddenException('Invalid refresh token');
+      // ⚠️ Token reuse hoặc session hết hạn → revoke hết
+      this.logger.warn(
+        `Possible token reuse: user=${userId} device=${deviceId} — revoking all sessions`,
+      );
+      await this.sessionService.revokeAllUserSessions(userId);
+      this.clearAuthCookies(res);
+      throw new ForbiddenException(
+        'Invalid refresh token. All sessions revoked.',
+      );
     }
 
-    const tokens = await this.generateTokens(user);
-    await this.updateRefreshToken(user.id, tokens.refreshToken);
-    return tokens;
+    // 2. Rotate — cấp refresh token mới
+    const { refreshToken: newRefreshToken } =
+      await this.sessionService.rotateSession(userId, deviceId, userAgent, ip);
+
+    // 3. Load user + sign access token mới
+    const user = await this.userService.findOne(userId);
+    const accessToken = await this.signAccessToken(user);
+
+    // 4. Set cookie mới
+    this.setAuthCookies(res, newRefreshToken, deviceId);
+
+    return { accessToken };
   }
 
+  async logout(
+    userId: string,
+    deviceId: string,
+    res: Response,
+  ): Promise<{ message: string }> {
+    await this.sessionService.revokeSession(userId, deviceId);
+    this.clearAuthCookies(res);
+    return { message: 'Logged out successfully' };
+  }
+
+  /**
+   * Logout tất cả device
+   */
+  async logoutAll(userId: string, res: Response): Promise<{ message: string }> {
+    await this.sessionService.revokeAllUserSessions(userId);
+    this.clearAuthCookies(res);
+    return { message: 'Logged out from all devices' };
+  }
+
+  async listSessions(
+    userId: string,
+  ): Promise<Array<Omit<SessionData, 'refreshTokenHash'>>> {
+    const sessions = await this.sessionService.listSessions(userId);
+    return sessions.map(({ refreshTokenHash, ...safe }) => safe);
+  }
+  async getProfile(userId: string): Promise<Omit<User, 'password'>> {
+    const user = await this.userService.findOne(userId);
+    const { password, ...safe } = user;
+    return safe;
+  }
+
+  /**
+   * Validate credentials (dùng cho LocalStrategy nếu cần)
+   */
   async validateUser(email: string, password: string): Promise<User | null> {
     const user = await this.userService.findByEmailWithPassword(email);
+    if (!user || !user.password) return null;
 
-    if (!user || !user.password) {
-      return null;
-    }
-
-    const isPasswordValid = await this.userService.validatePassword(
+    const isValid = await this.userService.validatePassword(
       password,
       user.password,
     );
-
-    if (!isPasswordValid) {
-      return null;
-    }
-
-    return user;
+    return isValid ? user : null;
   }
 
-  async getProfile(userId: string): Promise<Omit<User, 'password'>> {
-    const user = await this.userService.findOne(userId);
+  private async issueSessionAndRespond(
+    user: User,
+    deviceId: string,
+    userAgent: string,
+    ip: string,
+    res: Response,
+  ): Promise<AuthResponse> {
+    const { refreshToken } = await this.sessionService.createSession(
+      user.id,
+      deviceId,
+      userAgent,
+      ip,
+    );
+
+    const accessToken = await this.signAccessToken(user);
+    this.setAuthCookies(res, refreshToken, deviceId);
+
     const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    return { user: userWithoutPassword, accessToken };
   }
 
-  private async generateTokens(user: User): Promise<AuthTokens> {
+  /**
+   * Sign access token (JWT)
+   */
+  private async signAccessToken(user: User): Promise<string> {
     const payload: TokenPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
     };
 
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
-        expiresIn: this.configService.get<string>(
-          'JWT_ACCESS_EXPIRES_IN',
-          '15m',
-        ) as any,
-      }),
-      this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        expiresIn: this.configService.get<string>(
-          'JWT_REFRESH_EXPIRES_IN',
-          '7d',
-        ) as any,
-      }),
-    ]);
-
-    return { accessToken, refreshToken };
+    return this.jwtService.signAsync(payload, {
+      secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
+      expiresIn: this.configService.get<string>(
+        'JWT_ACCESS_EXPIRES_IN',
+        '15m',
+      ) as any,
+    });
   }
 
-  private async updateRefreshToken(
-    userId: string,
-    refreshToken: string | null,
-  ): Promise<void> {
-    const hashedToken = refreshToken
-      ? await bcrypt.hash(refreshToken, 10)
-      : null;
-    await this.userService.updateRefreshToken(userId, hashedToken);
+  /**
+   * Set httpOnly cookie cho refresh token + device id
+   */
+  private setAuthCookies(
+    res: Response,
+    refreshToken: string,
+    deviceId: string,
+  ): void {
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+
+    const baseOptions = {
+      httpOnly: true, // JS không đọc được
+      secure: isProduction, // HTTPS only ở prod
+      sameSite: 'strict' as const, // chống CSRF
+      maxAge: this.REFRESH_TTL_MS,
+      path: this.REFRESH_COOKIE_PATH,
+    };
+
+    res.cookie(this.REFRESH_COOKIE_NAME, refreshToken, baseOptions);
+    res.cookie(this.DEVICE_COOKIE_NAME, deviceId, {
+      ...baseOptions,
+      httpOnly: false, // client có thể đọc để debug / hiển thị
+    });
+  }
+
+  /**
+   * Clear cookie khi logout / revoke
+   */
+  private clearAuthCookies(res: Response): void {
+    const opts = { path: this.REFRESH_COOKIE_PATH };
+    res.clearCookie(this.REFRESH_COOKIE_NAME, opts);
+    res.clearCookie(this.DEVICE_COOKIE_NAME, opts);
+  }
+  async resolveRefreshToken(
+    refreshToken: string,
+  ): Promise<{ userId: string; deviceId: string } | null> {
+    return this.sessionService.resolveRefreshToken(refreshToken);
   }
 }
