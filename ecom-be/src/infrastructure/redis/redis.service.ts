@@ -77,14 +77,6 @@ export class RedisService {
   // src/infrastructure/redis/redis.service.ts
 
   /**
-   * Tìm tất cả key theo pattern (dùng KEYS — chỉ dùng cho tập key nhỏ)
-   * Production nên dùng scanKeys() để tránh block Redis
-   */
-  async keys(pattern: string): Promise<string[]> {
-    return this.redis.keys(pattern);
-  }
-
-  /**
    * Scan an toàn cho production — không block Redis
    */
   async scanKeys(pattern: string, count = 100): Promise<string[]> {

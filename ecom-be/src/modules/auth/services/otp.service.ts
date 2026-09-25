@@ -119,42 +119,4 @@ export class OtpService {
     await this.redis.del(otpKey, attemptsKey);
     return true;
   }
-
-  /**
-   * Kiểm tra tồn tại OTP (dùng cho flow register/login)
-   */
-  async isOtpValid(email: string, purpose: OtpPurposeType): Promise<boolean> {
-    return this.redis.exists(RedisKeys.OTP(email, purpose));
-  }
-
-  /**
-   * Dùng cho flow: xác thực OTP ở bước 1 → trả về verification token ngắn hạn
-   * (tránh việc user phải gửi lại OTP ở bước 2)
-   */
-  async issueVerificationToken(
-    email: string,
-    purpose: OtpPurposeType,
-  ): Promise<string> {
-    const token = randomBytes(32).toString('hex');
-    await this.redis.set(
-      `verify:${purpose}:${email}`,
-      token,
-      300, // 5 phút để hoàn tất bước tiếp theo
-    );
-    return token;
-  }
-
-  async consumeVerificationToken(
-    email: string,
-    purpose: OtpPurposeType,
-    token: string,
-  ): Promise<boolean> {
-    const key = `verify:${purpose}:${email}`;
-    const stored = await this.redis.get(key);
-    if (stored && stored === token) {
-      await this.redis.del(key);
-      return true;
-    }
-    return false;
-  }
 }

@@ -50,6 +50,8 @@ src/
       user-role.enum.ts
     exceptions/
       too-many-requests.exception.ts
+    guards/
+      user-throttler.guard.ts
     interfaces/
       otp-payload.interface.ts
   infrastructure/
@@ -65,7 +67,6 @@ src/
     auth/
       decorators/
         current-user.decorator.ts
-        public.decorator.ts
         roles.decorator.ts
       dto/
         login.dto.ts
@@ -126,11 +127,7 @@ export const RedisKeys = {
   // Session-per-device (NEW)
   SESSION: (userId: string, deviceId: string) =>
     `session:${userId}:${deviceId}`,
-  USER_SESSIONS: (userId: string) => `sessions:${userId}`,
   SESSION_FAMILY: (familyId: string) => `family:${familyId}`,
-
-  // Blacklist (NEW)
-  ACCESS_BLACKLIST: (jti: string) => `blacklist:access:${jti}`,
 };
 export const OtpPurpose = {
   REGISTER: 'register',
@@ -175,6 +172,68 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 export class TooManyRequestsException extends HttpException {
   constructor(message: string = 'Too Many Requests') {
     super(message, HttpStatus.TOO_MANY_REQUESTS); // 429
+  }
+}
+</file>
+
+<file path="src/common/guards/user-throttler.guard.ts">
+// src/common/guards/user-throttler.guard.ts
+import {
+  Injectable,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { ThrottlerGuard, ThrottlerLimitDetail } from '@nestjs/throttler';
+import * as jwt from 'jsonwebtoken';
+
+@Injectable()
+export class UserThrottlerGuard extends ThrottlerGuard {
+  protected readonly logger = new Logger(UserThrottlerGuard.name);
+
+  protected async getTracker(req: Record<string, any>): Promise<string> {
+    const authHeader = req.headers?.authorization;
+
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.slice(7);
+        const decoded = jwt.decode(token) as {
+          sub?: string;
+          role?: string;
+        } | null;
+
+        if (decoded?.role === 'admin' && decoded.sub) {
+          return `admin:${decoded.sub}`;
+        }
+        if (decoded?.sub) {
+          return `user:${decoded.sub}`;
+        }
+      } catch { }
+    }
+
+    return `ip:${req.ip}`;
+  }
+
+  protected async throwThrottlingException(
+    context: ExecutionContext,
+    throttlerLimitDetail: ThrottlerLimitDetail,
+  ): Promise<void> {
+    const req = context.switchToHttp().getRequest();
+    const ttlSeconds = Math.ceil(throttlerLimitDetail.timeToExpire / 1000);
+
+    this.logger.warn(
+      `🚫 Rate limit exceeded: ${req.method} ${req.url} (retry after ${ttlSeconds}s)`,
+    );
+
+    throw new HttpException(
+      {
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        message: `Quá nhiều yêu cầu. Vui lòng thử lại sau ${ttlSeconds} giây.`,
+        retryAfter: ttlSeconds,
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
   }
 }
 </file>
@@ -429,14 +488,6 @@ export class RedisService {
   // src/infrastructure/redis/redis.service.ts
 
   /**
-   * Tìm tất cả key theo pattern (dùng KEYS — chỉ dùng cho tập key nhỏ)
-   * Production nên dùng scanKeys() để tránh block Redis
-   */
-  async keys(pattern: string): Promise<string[]> {
-    return this.redis.keys(pattern);
-  }
-
-  /**
    * Scan an toàn cho production — không block Redis
    */
   async scanKeys(pattern: string, count = 100): Promise<string[]> {
@@ -471,14 +522,6 @@ export const CurrentUser = createParamDecorator(
     return data ? user?.[data] : user;
   },
 );
-</file>
-
-<file path="src/modules/auth/decorators/public.decorator.ts">
-// src/auth/decorators/public.decorator.ts (optional - nếu bạn muốn global guard)
-import { SetMetadata } from '@nestjs/common';
-
-export const IS_PUBLIC_KEY = 'isPublic';
-export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 </file>
 
 <file path="src/modules/auth/decorators/roles.decorator.ts">
@@ -785,44 +828,6 @@ export class OtpService {
     await this.redis.del(otpKey, attemptsKey);
     return true;
   }
-
-  /**
-   * Kiểm tra tồn tại OTP (dùng cho flow register/login)
-   */
-  async isOtpValid(email: string, purpose: OtpPurposeType): Promise<boolean> {
-    return this.redis.exists(RedisKeys.OTP(email, purpose));
-  }
-
-  /**
-   * Dùng cho flow: xác thực OTP ở bước 1 → trả về verification token ngắn hạn
-   * (tránh việc user phải gửi lại OTP ở bước 2)
-   */
-  async issueVerificationToken(
-    email: string,
-    purpose: OtpPurposeType,
-  ): Promise<string> {
-    const token = randomBytes(32).toString('hex');
-    await this.redis.set(
-      `verify:${purpose}:${email}`,
-      token,
-      300, // 5 phút để hoàn tất bước tiếp theo
-    );
-    return token;
-  }
-
-  async consumeVerificationToken(
-    email: string,
-    purpose: OtpPurposeType,
-    token: string,
-  ): Promise<boolean> {
-    const key = `verify:${purpose}:${email}`;
-    const stored = await this.redis.get(key);
-    if (stored && stored === token) {
-      await this.redis.del(key);
-      return true;
-    }
-    return false;
-  }
 }
 </file>
 
@@ -1081,7 +1086,9 @@ import {
   Ip,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
+
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -1100,7 +1107,16 @@ export class AuthController {
     private readonly otpService: OtpService,
   ) { }
 
+  // ============================================================
+  // LOGIN
+  // ============================================================
+
+  /**
+   * Đăng nhập
+   * Rate limit: 5 lần / 15 phút — chống brute force password
+   */
   @Post('login')
+  @Throttle({ default: { ttl: 900_000, limit: 5 } }) // 15p / 5 lần
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() loginDto: LoginDto,
@@ -1112,77 +1128,28 @@ export class AuthController {
     return this.authService.login(loginDto, deviceId, userAgent, ip, res);
   }
 
-  @Post('logout')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  async logout(
-    @CurrentUser() user: User,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const deviceId = req.cookies?.['deviceId'];
-    if (!deviceId) throw new UnauthorizedException('Missing device id');
-    return this.authService.logout(user.id, deviceId, res);
-  }
+  // ============================================================
+  // REGISTER (2-step với OTP)
+  // ============================================================
 
-  @Post('logout-all')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  async logoutAll(
-    @CurrentUser() user: User,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    return this.authService.logoutAll(user.id, res);
-  }
-
-  @Post('refresh')
-  @HttpCode(HttpStatus.OK)
-  async refresh(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-    @Headers('user-agent') userAgent: string,
-    @Ip() ip: string,
-  ) {
-    const refreshToken = req.cookies?.['refreshToken'];
-    if (!refreshToken) {
-      throw new UnauthorizedException('Missing refresh token');
-    }
-
-    // 🆕 Resolve token opaque → userId + deviceId
-    const resolved = await this.authService.resolveRefreshToken(refreshToken);
-    if (!resolved) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    return this.authService.refreshTokens(
-      resolved.userId,
-      resolved.deviceId,
-      refreshToken,
-      userAgent,
-      ip,
-      res,
-    );
-  }
-
-  @Get('profile')
-  @UseGuards(JwtAuthGuard)
-  async getProfile(@CurrentUser() user: User) {
-    return this.authService.getProfile(user.id);
-  }
-
-  @Get('sessions')
-  @UseGuards(JwtAuthGuard)
-  async listSessions(@CurrentUser() user: User) {
-    return this.authService.listSessions(user.id);
-  }
-
+  /**
+   * Bước 1: Gửi OTP đăng ký
+   * Rate limit: 3 lần / giờ — chống spam email
+   */
   @Post('register/send-otp')
+  @Throttle({ default: { ttl: 3_600_000, limit: 3 } }) // 1h / 3 lần
   @HttpCode(HttpStatus.CREATED)
   async registerSendOtp(@Body() dto: RegisterDto) {
     return this.authService.registerWithOtp(dto);
   }
 
+  /**
+   * Bước 2: Xác thực OTP → tạo session
+   * Rate limit: 10 lần / 15 phút — chống brute force OTP
+   * (attempts counter trong OtpService đã giới hạn 5 lần/OTP)
+   */
   @Post('register/verify-otp')
+  @Throttle({ default: { ttl: 900_000, limit: 10 } }) // 15p / 10 lần
   @HttpCode(HttpStatus.OK)
   async registerVerifyOtp(
     @Body() dto: VerifyOtpDto,
@@ -1201,11 +1168,121 @@ export class AuthController {
     );
   }
 
+  // ============================================================
+  // OTP RESEND
+  // ============================================================
+
+  /**
+   * Gửi lại OTP (dùng cho mọi purpose: register, forgot_password, login_2fa)
+   * Rate limit: 5 lần / giờ — chống spam resend
+   * (service đã có cooldown 60s/lần)
+   */
   @Post('otp/resend')
+  @Throttle({ default: { ttl: 3_600_000, limit: 5 } }) // 1h / 5 lần
   @HttpCode(HttpStatus.OK)
   async resendOtp(@Body() dto: ResendOtpDto) {
     await this.otpService.sendOtp(dto.email, dto.purpose);
     return { message: 'Đã gửi lại mã OTP' };
+  }
+
+  // ============================================================
+  // REFRESH TOKEN
+  // ============================================================
+
+  /**
+   * Làm mới access token
+   * Rate limit: 20 lần / phút — client tự động refresh
+   */
+  @Post('refresh')
+  @Throttle({ default: { ttl: 60_000, limit: 20 } }) // 1p / 20 lần
+  @HttpCode(HttpStatus.OK)
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Headers('user-agent') userAgent: string,
+    @Ip() ip: string,
+  ) {
+    const refreshToken = req.cookies?.['refreshToken'];
+    if (!refreshToken) {
+      throw new UnauthorizedException('Missing refresh token');
+    }
+
+    const resolved = await this.authService.resolveRefreshToken(refreshToken);
+    if (!resolved) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    return this.authService.refreshTokens(
+      resolved.userId,
+      resolved.deviceId,
+      refreshToken,
+      userAgent,
+      ip,
+      res,
+    );
+  }
+
+  // ============================================================
+  // LOGOUT
+  // ============================================================
+
+  /**
+   * Đăng xuất 1 device
+   * Rate limit: 10 lần / phút
+   */
+  @Post('logout')
+  @Throttle({ default: { ttl: 60_000, limit: 10 } }) // 1p / 10 lần
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async logout(
+    @CurrentUser() user: User,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const deviceId = req.cookies?.['deviceId'];
+    if (!deviceId) throw new UnauthorizedException('Missing device id');
+    return this.authService.logout(user.id, deviceId, res);
+  }
+
+  /**
+   * Đăng xuất tất cả device
+   * Rate limit: 5 lần / giờ — thao tác nguy hiểm, không nên gọi nhiều
+   */
+  @Post('logout-all')
+  @Throttle({ default: { ttl: 3_600_000, limit: 5 } }) // 1h / 5 lần
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(
+    @CurrentUser() user: User,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.authService.logoutAll(user.id, res);
+  }
+
+  // ============================================================
+  // PROFILE / SESSIONS
+  // ============================================================
+
+  /**
+   * Lấy profile của user hiện tại
+   * Rate limit: 60 lần / phút
+   */
+  @Get('profile')
+  @Throttle({ default: { ttl: 60_000, limit: 60 } }) // 1p / 60 lần
+  @UseGuards(JwtAuthGuard)
+  async getProfile(@CurrentUser() user: User) {
+    return this.authService.getProfile(user.id);
+  }
+
+  /**
+   * List tất cả session đang active
+   * Rate limit: 30 lần / phút
+   */
+  @Get('sessions')
+  @Throttle({ default: { ttl: 60_000, limit: 30 } }) // 1p / 30 lần
+  @UseGuards(JwtAuthGuard)
+  async listSessions(@CurrentUser() user: User) {
+    return this.authService.listSessions(user.id);
   }
 }
 </file>
@@ -1221,7 +1298,6 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UserModule } from '../user/user.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { SessionService } from './services/session.service';
 
 @Module({
@@ -1242,13 +1318,7 @@ import { SessionService } from './services/session.service';
       }),
     }),
   ],
-  providers: [
-    AuthService,
-    JwtStrategy,
-    JwtRefreshStrategy,
-    OtpService,
-    SessionService,
-  ],
+  providers: [AuthService, JwtStrategy, OtpService, SessionService],
   controllers: [AuthController],
   exports: [AuthService],
 })
@@ -1339,8 +1409,12 @@ export class AuthService {
     const user = await this.userService.findByEmail(email);
     if (!user) throw new BadRequestException('User không tồn tại');
 
+    await this.userService.markVerified(user.id);
+    user.isVerified = true;
+
     return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
   }
+
   async login(
     loginDto: LoginDto,
     deviceId: string,
@@ -1369,22 +1443,6 @@ export class AuthService {
     }
 
     return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
-  }
-
-  /**
-   * Gửi OTP đăng nhập 2FA (nếu bật)
-   */
-  async sendLoginOtp(email: string): Promise<{ message: string }> {
-    const user = await this.userService.findByEmail(email);
-    const genericMessage = 'Nếu email tồn tại, mã OTP đã được gửi.';
-
-    if (!user) {
-      // Tránh leak user enumeration
-      return { message: genericMessage };
-    }
-
-    await this.otpService.sendOtp(email, OtpPurpose.LOGIN_2FA);
-    return { message: genericMessage };
   }
 
   async refreshTokens(
@@ -1457,20 +1515,6 @@ export class AuthService {
     const user = await this.userService.findOne(userId);
     const { password, ...safe } = user;
     return safe;
-  }
-
-  /**
-   * Validate credentials (dùng cho LocalStrategy nếu cần)
-   */
-  async validateUser(email: string, password: string): Promise<User | null> {
-    const user = await this.userService.findByEmailWithPassword(email);
-    if (!user || !user.password) return null;
-
-    const isValid = await this.userService.validatePassword(
-      password,
-      user.password,
-    );
-    return isValid ? user : null;
   }
 
   private async issueSessionAndRespond(
@@ -1660,7 +1704,7 @@ export class UpdateUserDto extends PartialType(CreateUserDto) { }
 </file>
 
 <file path="src/modules/user/user.controller.ts">
-// src/users/users.controller.ts
+// src/modules/user/user.controller.ts
 import {
   Controller,
   Get,
@@ -1674,6 +1718,8 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -1690,40 +1736,95 @@ import { User } from './user.entity';
 export class UserController {
   constructor(private readonly userService: UserService) { }
 
+  // ============================================================
+  // ADMIN — CREATE
+  // ============================================================
+
+  /**
+   * Admin tạo user mới
+   * Rate limit: 20 lần / phút
+   */
   @Post()
   @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 20 } }) // 1p / 20 lần
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() createUserDto: CreateUserDto) {
     return await this.userService.create(createUserDto);
   }
 
+  // ============================================================
+  // ADMIN — LIST ALL
+  // ============================================================
+
+  /**
+   * Admin list tất cả user
+   * Rate limit: 100 lần / phút — admin cần xem list nhiều
+   */
   @Get()
   @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 100 } }) // 1p / 100 lần
   async findAll() {
     return await this.userService.findAll();
   }
 
+  // ============================================================
+  // USER — OWN PROFILE
+  // ============================================================
+
+  /**
+   * User xem profile của mình
+   * Rate limit: 60 lần / phút
+   */
   @Get('me')
+  @Throttle({ default: { ttl: 60_000, limit: 60 } }) // 1p / 60 lần
   async getProfile(@CurrentUser() user: User) {
     return await this.userService.findOne(user.id);
   }
 
+  // ============================================================
+  // ADMIN — GET ONE
+  // ============================================================
+
+  /**
+   * Admin xem 1 user theo id
+   * Rate limit: 100 lần / phút
+   */
   @Get(':id')
   @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 100 } }) // 1p / 100 lần
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return await this.userService.findOne(id);
   }
 
+  // ============================================================
+  // USER — UPDATE OWN PROFILE
+  // ============================================================
+
+  /**
+   * User tự update profile (firstName, lastName, phone, avatar)
+   * KHÔNG thể đổi role/email/username/password qua route này
+   * Rate limit: 10 lần / phút — update profile không nên spam
+   */
   @Patch('me')
+  @Throttle({ default: { ttl: 60_000, limit: 10 } }) // 1p / 10 lần
   async updateProfile(
     @CurrentUser() user: User,
-    @Body() updateProfileDto: UpdateProfileDto, // 🆕 ĐỔI TYPE
+    @Body() updateProfileDto: UpdateProfileDto,
   ) {
     return await this.userService.updateProfile(user.id, updateProfileDto);
   }
 
+  // ============================================================
+  // ADMIN — UPDATE USER
+  // ============================================================
+
+  /**
+   * Admin update user (có thể đổi email, username, password, role)
+   * Rate limit: 30 lần / phút
+   */
   @Patch(':id')
   @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 30 } }) // 1p / 30 lần
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateUserDto: UpdateUserDto,
@@ -1731,8 +1832,17 @@ export class UserController {
     return await this.userService.update(id, updateUserDto);
   }
 
+  // ============================================================
+  // ADMIN — CHANGE ROLE
+  // ============================================================
+
+  /**
+   * Admin đổi role của user
+   * Rate limit: 10 lần / phút — thao tác nguy hiểm
+   */
   @Patch(':id/role')
   @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } }) // 1p / 10 lần
   async updateRole(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('role') role: UserRole,
@@ -1740,8 +1850,17 @@ export class UserController {
     return await this.userService.updateRole(id, role);
   }
 
+  // ============================================================
+  // ADMIN — DELETE USER
+  // ============================================================
+
+  /**
+   * Admin xóa user
+   * Rate limit: 20 lần / phút — thao tác nguy hiểm, không nên spam
+   */
   @Delete(':id')
   @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 20 } }) // 1p / 20 lần
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', ParseUUIDPipe) id: string) {
     await this.userService.remove(id);
@@ -1977,17 +2096,34 @@ export class UserService {
 </file>
 
 <file path="src/app.module.ts">
+// src/app.module.ts
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import Redis from 'ioredis';
+
 import { UserModule } from './modules/user/user.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
 import { MailModule } from './infrastructure/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // ===========================
+    // Config (global)
+    // ===========================
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env'],
+    }),
+
+    // ===========================
+    // Database
+    // ===========================
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -1999,13 +2135,58 @@ import { AuthModule } from './modules/auth/auth.module';
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_DATABASE'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: true,
+        // ⚠️ synchronize: chỉ true ở dev, false ở prod
+        synchronize: configService.get('NODE_ENV') !== 'production',
+        logging: configService.get('NODE_ENV') === 'development',
       }),
     }),
+
+    // ===========================
+    // Rate Limiting
+    // ===========================
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        throttlers: [
+          {
+            name: 'default',
+            ttl: 60_000, // 1 phút
+            limit: 100, // 100 requests/phút cho mọi route không override
+          },
+        ],
+        // Redis storage → shared counter cho tất cả instance
+        storage: new ThrottlerStorageRedisService(
+          new Redis({
+            host: config.get<string>('REDIS_HOST', 'localhost'),
+            port: config.get<number>('REDIS_PORT', 6379),
+            password: config.get<string>('REDIS_PASSWORD'),
+            db: config.get<number>('REDIS_DB', 0),
+            keyPrefix: 'throttle:',
+          }),
+        ),
+      }),
+    }),
+
+    // ===========================
+    // Infrastructure
+    // ===========================
     RedisModule,
     MailModule,
+
+    // ===========================
+    // Feature modules
+    // ===========================
     UserModule,
     AuthModule,
+  ],
+  providers: [
+    // Global throttler guard — áp dụng cho MỌI route
+    // Custom guard: track theo userId nếu đã login, fallback về IP
+    {
+      provide: APP_GUARD,
+      useClass: UserThrottlerGuard,
+    },
   ],
 })
 export class AppModule { }
@@ -2021,6 +2202,10 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Trust proxy — CHỈ bật khi chạy sau reverse proxy (Nginx, Cloudflare, LB)
+  // Nếu chạy trực tiếp (không qua proxy) → COMMENT dòng này
+  // app.set('trust proxy', 1);
 
   app.use(cookieParser());
   app.useGlobalPipes(
@@ -2044,7 +2229,7 @@ async function bootstrap() {
     .setDescription('Tài liệu API hệ thống E-Commerce')
     .setVersion('1.0')
     .addBearerAuth()
-    .addCookieAuth('refreshToken') // ← thêm cookie auth cho Swagger
+    .addCookieAuth('refreshToken')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
@@ -2171,23 +2356,33 @@ services:
     container_name: postgres_test
     restart: always
     environment:
-      POSTGRES_USER: long
-      POSTGRES_PASSWORD: 123
-      POSTGRES_DB: e-com
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin}
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ecommerce}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: redis_test
     restart: always
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mailhog:
     image: mailhog/mailhog:latest

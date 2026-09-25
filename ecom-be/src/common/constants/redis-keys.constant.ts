@@ -10,11 +10,7 @@ export const RedisKeys = {
   // Session-per-device (NEW)
   SESSION: (userId: string, deviceId: string) =>
     `session:${userId}:${deviceId}`,
-  USER_SESSIONS: (userId: string) => `sessions:${userId}`,
   SESSION_FAMILY: (familyId: string) => `family:${familyId}`,
-
-  // Blacklist (NEW)
-  ACCESS_BLACKLIST: (jti: string) => `blacklist:access:${jti}`,
 };
 export const OtpPurpose = {
   REGISTER: 'register',

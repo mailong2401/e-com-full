@@ -8,6 +8,10 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Trust proxy — CHỈ bật khi chạy sau reverse proxy (Nginx, Cloudflare, LB)
+  // Nếu chạy trực tiếp (không qua proxy) → COMMENT dòng này
+  // app.set('trust proxy', 1);
+
   app.use(cookieParser());
   app.useGlobalPipes(
     new ValidationPipe({
@@ -30,7 +34,7 @@ async function bootstrap() {
     .setDescription('Tài liệu API hệ thống E-Commerce')
     .setVersion('1.0')
     .addBearerAuth()
-    .addCookieAuth('refreshToken') // ← thêm cookie auth cho Swagger
+    .addCookieAuth('refreshToken')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

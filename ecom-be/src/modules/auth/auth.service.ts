@@ -117,22 +117,6 @@ export class AuthService {
     return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
   }
 
-  /**
-   * Gửi OTP đăng nhập 2FA (nếu bật)
-   */
-  async sendLoginOtp(email: string): Promise<{ message: string }> {
-    const user = await this.userService.findByEmail(email);
-    const genericMessage = 'Nếu email tồn tại, mã OTP đã được gửi.';
-
-    if (!user) {
-      // Tránh leak user enumeration
-      return { message: genericMessage };
-    }
-
-    await this.otpService.sendOtp(email, OtpPurpose.LOGIN_2FA);
-    return { message: genericMessage };
-  }
-
   async refreshTokens(
     userId: string,
     deviceId: string,
@@ -203,20 +187,6 @@ export class AuthService {
     const user = await this.userService.findOne(userId);
     const { password, ...safe } = user;
     return safe;
-  }
-
-  /**
-   * Validate credentials (dùng cho LocalStrategy nếu cần)
-   */
-  async validateUser(email: string, password: string): Promise<User | null> {
-    const user = await this.userService.findByEmailWithPassword(email);
-    if (!user || !user.password) return null;
-
-    const isValid = await this.userService.validatePassword(
-      password,
-      user.password,
-    );
-    return isValid ? user : null;
   }
 
   private async issueSessionAndRespond(
