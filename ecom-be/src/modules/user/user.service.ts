@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from './user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserRole } from 'src/common/enums/user-role.enum';
 
@@ -129,6 +130,17 @@ export class UserService {
   async updateRole(id: string, role: UserRole): Promise<User> {
     const user = await this.findOne(id);
     user.role = role;
+    return await this.userRepository.save(user);
+  }
+  async markVerified(id: string): Promise<void> {
+    await this.userRepository.update(id, { isVerified: true });
+  }
+  async updateProfile(
+    id: string,
+    updateProfileDto: UpdateProfileDto,
+  ): Promise<User> {
+    const user = await this.findOne(id);
+    Object.assign(user, updateProfileDto);
     return await this.userRepository.save(user);
   }
 }

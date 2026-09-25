@@ -1,3 +1,4 @@
+// src/modules/user/user.entity.ts
 import { UserRole } from 'src/common/enums/user-role.enum';
 import {
   Column,
@@ -32,6 +33,9 @@ export class User {
     select: false,
   })
   password!: string;
+
+  @Column({ name: 'is_verified', type: 'boolean', default: false })
+  isVerified!: boolean;
 
   @Column({ name: 'phone', type: 'varchar', length: 20, nullable: true })
   phone!: string | null;

@@ -32,18 +32,6 @@ export class AuthController {
     private readonly otpService: OtpService,
   ) { }
 
-  @Post('register')
-  @HttpCode(HttpStatus.CREATED)
-  async register(
-    @Body() registerDto: RegisterDto,
-    @DeviceId() deviceId: string,
-    @Headers('user-agent') userAgent: string,
-    @Ip() ip: string,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    return this.authService.register(registerDto, deviceId, userAgent, ip, res);
-  }
-
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(

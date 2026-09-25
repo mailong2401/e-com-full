@@ -8,9 +8,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { Response } from 'express';
-import * as bcrypt from 'bcrypt';
-
+import type { Response } from 'express';
 import { OtpService } from './services/otp.service';
 import { SessionService, SessionData } from './services/session.service';
 import { OtpPurpose } from 'src/common/constants/redis-keys.constant';
@@ -55,21 +53,6 @@ export class AuthService {
     private readonly sessionService: SessionService,
   ) { }
 
-  async register(
-    registerDto: RegisterDto,
-    deviceId: string,
-    userAgent: string,
-    ip: string,
-    res: Response,
-  ): Promise<AuthResponse> {
-    const user = await this.userService.create({
-      ...registerDto,
-      role: UserRole.USER,
-    });
-
-    return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
-  }
-
   async registerWithOtp(
     registerDto: RegisterDto,
   ): Promise<{ message: string }> {
@@ -98,8 +81,12 @@ export class AuthService {
     const user = await this.userService.findByEmail(email);
     if (!user) throw new BadRequestException('User không tồn tại');
 
+    await this.userService.markVerified(user.id);
+    user.isVerified = true;
+
     return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
   }
+
   async login(
     loginDto: LoginDto,
     deviceId: string,
@@ -120,6 +107,11 @@ export class AuthService {
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+    if (!user.isVerified) {
+      throw new UnauthorizedException(
+        'Tài khoản chưa được xác thực. Vui lòng xác thực OTP.',
+      );
     }
 
     return this.issueSessionAndRespond(user, deviceId, userAgent, ip, res);
