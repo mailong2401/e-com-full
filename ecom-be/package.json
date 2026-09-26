@@ -39,6 +39,7 @@
     "cookie-parser": "^1.4.7",
     "handlebars": "^4.7.9",
     "ioredis": "^6.0.0",
+    "jsonwebtoken": "^9.0.3",
     "mailer": "^0.6.7",
     "nodemailer": "^10.0.10",
     "passport-jwt": "^4.0.1",

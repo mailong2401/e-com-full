@@ -12,6 +12,8 @@ import { RedisModule } from './infrastructure/redis/redis.module';
 import { MailModule } from './infrastructure/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
+import { ProductModule } from './modules/product/product.module';
+import { CartModule } from './modules/cart/cart.module';
 
 @Module({
   imports: [
@@ -81,6 +83,8 @@ import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
     // ===========================
     UserModule,
     AuthModule,
+    ProductModule,
+    CartModule,
   ],
   providers: [
     // Global throttler guard — áp dụng cho MỌI route

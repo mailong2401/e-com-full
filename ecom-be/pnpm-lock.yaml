@@ -65,6 +65,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      jsonwebtoken:
+        specifier: ^9.0.3
+        version: 9.0.3
       mailer:
         specifier: ^0.6.7
         version: 0.6.7

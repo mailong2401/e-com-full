@@ -17,24 +17,9 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { User } from '../user/user.entity';
 import { UserRole } from 'src/common/enums/user-role.enum';
-
-export interface TokenPayload {
-  sub: string;
-  email: string;
-  role: UserRole;
-}
-
-/**
- * Chỉ còn access token — refresh token đi qua httpOnly cookie
- */
-export interface AuthResponse {
-  user: Omit<User, 'password'>;
-  accessToken: string;
-}
-
-export interface RefreshResponse {
-  accessToken: string;
-}
+import { TokenPayload } from './interface/token-payload.interface';
+import { AuthResponse } from './interface/auth-response.interface';
+import { RefreshResponse } from './interface/refresh-response.interface';
 
 @Injectable()
 export class AuthService {
