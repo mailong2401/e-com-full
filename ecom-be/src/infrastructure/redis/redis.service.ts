@@ -95,4 +95,33 @@ export class RedisService {
     } while (cursor !== '0');
     return found;
   }
+  // src/infrastructure/redis/redis.service.ts — THÊM method này
+
+  /**
+   * SET NX EX — atomic set if not exists với TTL
+   * Dùng cho distributed lock, idempotency key
+   */
+  async setNX(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    const result = await this.redis.set(key, value, 'EX', ttlSeconds, 'NX');
+    return result === 'OK';
+  }
+
+  /**
+   * Release lock an toàn — chỉ xóa nếu value khớp
+   */
+  async releaseLock(key: string, value: string): Promise<boolean> {
+    const script = `
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+      return redis.call("del", KEYS[1])
+    else
+      return 0
+    end
+  `;
+    const result = await this.redis.eval(script, 1, key, value);
+    return result === 1;
+  }
 }

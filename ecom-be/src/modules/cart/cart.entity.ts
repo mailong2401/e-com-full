@@ -16,6 +16,12 @@ export enum CartStatus {
   ABANDONED = 'abandoned',
 }
 
+export enum CartPaymentStatus {
+  UNPAID = 'unpaid',
+  PAID = 'paid',
+  REFUNDED = 'refunded',
+}
+
 @Entity('carts')
 @Index(['userId'])
 @Index(['deviceId'])
@@ -24,11 +30,9 @@ export class Cart {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  // Null nếu là guest cart
   @Column({ name: 'user_id', type: 'uuid', nullable: true })
   userId!: string | null;
 
-  // Dùng cho guest cart (device fingerprint)
   @Column({ name: 'device_id', type: 'varchar', length: 100, nullable: true })
   deviceId!: string | null;
 
@@ -39,6 +43,26 @@ export class Cart {
     default: CartStatus.ACTIVE,
   })
   status!: CartStatus;
+
+  @Column({
+    name: 'payment_status',
+    type: 'enum',
+    enum: CartPaymentStatus,
+    default: CartPaymentStatus.UNPAID,
+  })
+  paymentStatus!: CartPaymentStatus;
+
+  @Column({
+    name: 'total_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  totalAmount!: number;
+
+  @Column({ name: 'paid_at', type: 'timestamp', nullable: true })
+  paidAt!: Date | null;
 
   @OneToMany(() => CartItem, (item) => item.cart, {
     cascade: true,

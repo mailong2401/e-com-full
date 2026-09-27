@@ -47,6 +47,8 @@ src/
     decorators/
       device-id.decorator.ts
     enums/
+      product-sort-by.enum.ts
+      product-status.enum.ts
       user-role.enum.ts
     exceptions/
       too-many-requests.exception.ts
@@ -76,6 +78,10 @@ src/
       guards/
         jwt-auth.guard.ts
         roles.guard.ts
+      interface/
+        auth-response.interface.ts
+        refresh-response.interface.ts
+        token-payload.interface.ts
       services/
         otp.service.ts
         session.service.ts
@@ -84,6 +90,42 @@ src/
       auth.controller.ts
       auth.module.ts
       auth.service.ts
+    cart/
+      dto/
+        add-to-cart.dto.ts
+        query-cart.dto.ts
+        update-cart-item.dto.ts
+      cart-item.entity.ts
+      cart.controller.ts
+      cart.entity.ts
+      cart.module.ts
+      cart.service.ts
+    payment/
+      constants/
+        payment.constant.ts
+      dto/
+        create-payment.dto.ts
+      entities/
+        payment-transaction.entity.ts
+      gateways/
+        momo.gateway.ts
+        vnpay.gateway.ts
+      guards/
+        webhook-ip.guard.ts
+      interfaces/
+        payment-gateway.interface.ts
+      payment.controller.ts
+      payment.module.ts
+      payment.service.ts
+    product/
+      dto/
+        create-product.dto.ts
+        query-product.dto.ts
+        update-product.dto.ts
+      product.controller.ts
+      product.entity.ts
+      product.module.ts
+      product.service.ts
     user/
       dto/
         create-user.dto.ts
@@ -156,6 +198,24 @@ export const DeviceId = createParamDecorator(
     return deviceId;
   },
 );
+</file>
+
+<file path="src/common/enums/product-sort-by.enum.ts">
+export enum ProductSortBy {
+  CREATED_AT = 'createdAt',
+  PRICE = 'price',
+  RATING = 'rating',
+  NAME = 'name',
+}
+</file>
+
+<file path="src/common/enums/product-status.enum.ts">
+export enum ProductStatus {
+  DRAFT = 'draft',
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+  OUT_OF_STOCK = 'out_of_stock',
+}
 </file>
 
 <file path="src/common/enums/user-role.enum.ts">
@@ -506,6 +566,35 @@ export class RedisService {
     } while (cursor !== '0');
     return found;
   }
+  // src/infrastructure/redis/redis.service.ts — THÊM method này
+
+  /**
+   * SET NX EX — atomic set if not exists với TTL
+   * Dùng cho distributed lock, idempotency key
+   */
+  async setNX(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    const result = await this.redis.set(key, value, 'EX', ttlSeconds, 'NX');
+    return result === 'OK';
+  }
+
+  /**
+   * Release lock an toàn — chỉ xóa nếu value khớp
+   */
+  async releaseLock(key: string, value: string): Promise<boolean> {
+    const script = `
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+      return redis.call("del", KEYS[1])
+    else
+      return 0
+    end
+  `;
+    const result = await this.redis.eval(script, 1, key, value);
+    return result === 1;
+  }
 }
 </file>
 
@@ -703,6 +792,31 @@ export class RolesGuard implements CanActivate {
 
     return true;
   }
+}
+</file>
+
+<file path="src/modules/auth/interface/auth-response.interface.ts">
+import { User } from 'src/modules/user/user.entity';
+
+export interface AuthResponse {
+  user: Omit<User, 'password'>;
+  accessToken: string;
+}
+</file>
+
+<file path="src/modules/auth/interface/refresh-response.interface.ts">
+export interface RefreshResponse {
+  accessToken: string;
+}
+</file>
+
+<file path="src/modules/auth/interface/token-payload.interface.ts">
+import { UserRole } from 'src/common/enums/user-role.enum';
+
+export interface TokenPayload {
+  sub: string;
+  email: string;
+  role: UserRole;
 }
 </file>
 
@@ -1045,7 +1159,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { UserService } from '../../user/user.service';
-import { TokenPayload } from '../auth.service';
+import { TokenPayload } from '../interface/token-payload.interface';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
@@ -1345,24 +1459,9 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { User } from '../user/user.entity';
 import { UserRole } from 'src/common/enums/user-role.enum';
-
-export interface TokenPayload {
-  sub: string;
-  email: string;
-  role: UserRole;
-}
-
-/**
- * Chỉ còn access token — refresh token đi qua httpOnly cookie
- */
-export interface AuthResponse {
-  user: Omit<User, 'password'>;
-  accessToken: string;
-}
-
-export interface RefreshResponse {
-  accessToken: string;
-}
+import { TokenPayload } from './interface/token-payload.interface';
+import { AuthResponse } from './interface/auth-response.interface';
+import { RefreshResponse } from './interface/refresh-response.interface';
 
 @Injectable()
 export class AuthService {
@@ -1595,6 +1694,2352 @@ export class AuthService {
     refreshToken: string,
   ): Promise<{ userId: string; deviceId: string } | null> {
     return this.sessionService.resolveRefreshToken(refreshToken);
+  }
+}
+</file>
+
+<file path="src/modules/cart/dto/add-to-cart.dto.ts">
+// src/modules/cart/dto/add-to-cart.dto.ts
+import { Type } from 'class-transformer';
+import { IsInt, IsNotEmpty, IsUUID, Max, Min } from 'class-validator';
+
+export class AddToCartDto {
+  @IsUUID()
+  @IsNotEmpty()
+  productId!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  quantity!: number;
+}
+</file>
+
+<file path="src/modules/cart/dto/query-cart.dto.ts">
+// src/modules/cart/dto/query-cart.dto.ts
+import { IsIn, IsOptional } from 'class-validator';
+
+export class QueryCartDto {
+  @IsIn(['true', 'false'])
+  @IsOptional()
+  withProductDetails?: string; // 'true' | 'false'
+}
+</file>
+
+<file path="src/modules/cart/dto/update-cart-item.dto.ts">
+// src/modules/cart/dto/update-cart-item.dto.ts
+import { Type } from 'class-transformer';
+import { IsInt, Max, Min } from 'class-validator';
+
+export class UpdateCartItemDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(0) // 0 = xóa item
+  @Max(999)
+  quantity!: number;
+}
+</file>
+
+<file path="src/modules/cart/cart-item.entity.ts">
+// src/modules/cart/cart-item.entity.ts
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  Unique,
+  UpdateDateColumn,
+} from 'typeorm';
+import { Cart } from './cart.entity';
+import { Product } from '../product/product.entity';
+
+@Entity('cart_items')
+@Unique(['cartId', 'productId']) // 1 cart chỉ có 1 row cho 1 product
+@Index(['cartId'])
+export class CartItem {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'cart_id', type: 'uuid' })
+  cartId!: string;
+
+  @ManyToOne(() => Cart, (cart) => cart.items, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'cart_id' })
+  cart!: Cart;
+
+  @Column({ name: 'product_id', type: 'uuid' })
+  productId!: string;
+
+  @ManyToOne(() => Product, { onDelete: 'CASCADE', eager: true })
+  @JoinColumn({ name: 'product_id' })
+  product!: Product;
+
+  @Column({ name: 'quantity', type: 'int', default: 1 })
+  quantity!: number;
+
+  // Snapshot giá tại thời điểm thêm vào cart
+  // → nếu giá product thay đổi, cart vẫn giữ giá cũ để so sánh
+  @Column({
+    name: 'price_snapshot',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+  })
+  priceSnapshot!: number;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt!: Date;
+}
+</file>
+
+<file path="src/modules/cart/cart.controller.ts">
+// src/modules/cart/cart.controller.ts
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  ParseUUIDPipe,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+
+import { CartService } from './cart.service';
+import { AddToCartDto } from './dto/add-to-cart.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
+import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';
+import { CurrentUser } from 'src/modules/auth/decorators/current-user.decorator';
+import { User } from '../user/user.entity';
+import { DeviceId } from 'src/common/decorators/device-id.decorator';
+
+@Controller('carts')
+export class CartController {
+  constructor(private readonly cartService: CartService) { }
+
+  // ============================================================
+  // GET MY CART (user hoặc guest)
+  // ============================================================
+
+  /**
+   * Lấy cart hiện tại (tự động tạo nếu chưa có)
+   * Rate limit: 100 lần / phút
+   */
+  @Get('me')
+  @Throttle({ default: { ttl: 60_000, limit: 100 } })
+  async getMyCart(
+    @CurrentUser() user: User | undefined,
+    @DeviceId() deviceId: string,
+  ) {
+    return await this.cartService.getMyCart(user?.id ?? null, deviceId);
+  }
+
+  // ============================================================
+  // ADD ITEM
+  // ============================================================
+
+  /**
+   * Thêm sản phẩm vào cart
+   * Rate limit: 30 lần / phút
+   */
+  @Post('items')
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  @HttpCode(HttpStatus.OK)
+  async addItem(
+    @CurrentUser() user: User | undefined,
+    @DeviceId() deviceId: string,
+    @Body() dto: AddToCartDto,
+  ) {
+    return await this.cartService.addItem(user?.id ?? null, deviceId, dto);
+  }
+
+  // ============================================================
+  // UPDATE ITEM
+  // ============================================================
+
+  /**
+   * Cập nhật số lượng item (quantity = 0 → xóa)
+   * Rate limit: 30 lần / phút
+   */
+  @Patch('items/:itemId')
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  async updateItem(
+    @CurrentUser() user: User | undefined,
+    @DeviceId() deviceId: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: UpdateCartItemDto,
+  ) {
+    return await this.cartService.updateItem(
+      user?.id ?? null,
+      deviceId,
+      itemId,
+      dto,
+    );
+  }
+
+  // ============================================================
+  // REMOVE ITEM
+  // ============================================================
+
+  /**
+   * Xóa 1 item khỏi cart
+   * Rate limit: 30 lần / phút
+   */
+  @Delete('items/:itemId')
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  async removeItem(
+    @CurrentUser() user: User | undefined,
+    @DeviceId() deviceId: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+  ) {
+    return await this.cartService.removeItem(
+      user?.id ?? null,
+      deviceId,
+      itemId,
+    );
+  }
+
+  // ============================================================
+  // CLEAR CART
+  // ============================================================
+
+  /**
+   * Xóa toàn bộ cart
+   * Rate limit: 10 lần / phút
+   */
+  @Delete('me')
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  async clearCart(
+    @CurrentUser() user: User | undefined,
+    @DeviceId() deviceId: string,
+  ) {
+    return await this.cartService.clearCart(user?.id ?? null, deviceId);
+  }
+
+  // ============================================================
+  // MERGE GUEST CART (sau khi login)
+  // ============================================================
+
+  /**
+   * Gộp guest cart vào user cart — gọi sau khi login
+   * Rate limit: 5 lần / phút
+   */
+  @Post('merge')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
+  @HttpCode(HttpStatus.OK)
+  async mergeGuestCart(
+    @CurrentUser() user: User,
+    @DeviceId() deviceId: string,
+  ) {
+    return await this.cartService.mergeGuestCart(user.id, deviceId);
+  }
+}
+</file>
+
+<file path="src/modules/cart/cart.entity.ts">
+// src/modules/cart/cart.entity.ts
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  OneToMany,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { CartItem } from './cart-item.entity';
+
+export enum CartStatus {
+  ACTIVE = 'active',
+  CHECKED_OUT = 'checked_out',
+  ABANDONED = 'abandoned',
+}
+
+export enum CartPaymentStatus {
+  UNPAID = 'unpaid',
+  PAID = 'paid',
+  REFUNDED = 'refunded',
+}
+
+@Entity('carts')
+@Index(['userId'])
+@Index(['deviceId'])
+@Index(['status', 'updatedAt'])
+export class Cart {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'user_id', type: 'uuid', nullable: true })
+  userId!: string | null;
+
+  @Column({ name: 'device_id', type: 'varchar', length: 100, nullable: true })
+  deviceId!: string | null;
+
+  @Column({
+    name: 'status',
+    type: 'enum',
+    enum: CartStatus,
+    default: CartStatus.ACTIVE,
+  })
+  status!: CartStatus;
+
+  @Column({
+    name: 'payment_status',
+    type: 'enum',
+    enum: CartPaymentStatus,
+    default: CartPaymentStatus.UNPAID,
+  })
+  paymentStatus!: CartPaymentStatus;
+
+  @Column({
+    name: 'total_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  totalAmount!: number;
+
+  @Column({ name: 'paid_at', type: 'timestamp', nullable: true })
+  paidAt!: Date | null;
+
+  @OneToMany(() => CartItem, (item) => item.cart, {
+    cascade: true,
+    eager: true,
+  })
+  items!: CartItem[];
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt!: Date;
+}
+</file>
+
+<file path="src/modules/cart/cart.module.ts">
+// src/modules/cart/cart.module.ts
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Cart } from './cart.entity';
+import { CartItem } from './cart-item.entity';
+import { Product } from '../product/product.entity';
+import { CartService } from './cart.service';
+import { CartController } from './cart.controller';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([Cart, CartItem, Product])],
+  providers: [CartService],
+  controllers: [CartController],
+  exports: [CartService],
+})
+export class CartModule { }
+</file>
+
+<file path="src/modules/cart/cart.service.ts">
+// src/modules/cart/cart.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, DataSource, IsNull } from 'typeorm';
+import { Cart, CartStatus, CartPaymentStatus } from './cart.entity';
+import { CartItem } from './cart-item.entity';
+import { Product } from '../product/product.entity';
+import { ProductStatus } from 'src/common/enums/product-status.enum';
+import { AddToCartDto } from './dto/add-to-cart.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
+import { RedisService } from 'src/infrastructure/redis/redis.service';
+
+export interface CartSummary {
+  id: string;
+  items: Array<{
+    id: string;
+    productId: string;
+    name: string;
+    image: string | null;
+    price: number;
+    salePrice: number | null;
+    quantity: number;
+    subtotal: number;
+    priceChanged: boolean;
+    stockAvailable: number;
+    inStock: boolean;
+  }>;
+  totalItems: number;
+  totalQuantity: number;
+  subtotal: number;
+  discount: number;
+  total: number;
+}
+
+@Injectable()
+export class CartService {
+  private readonly logger = new Logger(CartService.name);
+  private readonly CART_CACHE_TTL = 300; // 5 phút
+
+  constructor(
+    @InjectRepository(Cart)
+    private readonly cartRepository: Repository<Cart>,
+    @InjectRepository(CartItem)
+    private readonly cartItemRepository: Repository<CartItem>,
+    @InjectRepository(Product)
+    private readonly productRepository: Repository<Product>,
+    private readonly redis: RedisService,
+    private readonly dataSource: DataSource,
+  ) { }
+
+  // ============================================================
+  // CACHE HELPERS
+  // ============================================================
+
+  private cacheKey(cartId: string): string {
+    return `cart:summary:${cartId}`;
+  }
+
+  private async invalidateCache(cartId: string): Promise<void> {
+    await this.redis.del(this.cacheKey(cartId));
+  }
+
+  // ============================================================
+  // GET OR CREATE CART
+  // ============================================================
+
+  /**
+   * Lấy cart đang active của user/device
+   * Nếu chưa có → tạo mới
+   */
+  async getOrCreateCart(
+    userId: string | null,
+    deviceId: string | null,
+  ): Promise<Cart> {
+    if (!userId && !deviceId) {
+      throw new BadRequestException('Either userId or deviceId is required');
+    }
+
+    let cart: Cart | null;
+
+    if (userId) {
+      cart = await this.cartRepository.findOne({
+        where: { userId, status: CartStatus.ACTIVE },
+      });
+    } else {
+      cart = await this.cartRepository.findOne({
+        where: {
+          deviceId: deviceId as string,
+          userId: IsNull(),
+          status: CartStatus.ACTIVE,
+        },
+      });
+    }
+
+    if (!cart) {
+      cart = this.cartRepository.create({
+        userId,
+        deviceId,
+        status: CartStatus.ACTIVE,
+        items: [],
+      });
+      cart = await this.cartRepository.save(cart);
+      this.logger.log(
+        `Cart created: ${cart.id} (user=${userId ?? 'guest'}, device=${deviceId})`,
+      );
+    }
+
+    return cart;
+  }
+
+  // ============================================================
+  // ADD ITEM
+  // ============================================================
+
+  async addItem(
+    userId: string | null,
+    deviceId: string | null,
+    dto: AddToCartDto,
+  ): Promise<CartSummary> {
+    const cart = await this.getOrCreateCart(userId, deviceId);
+
+    // Validate product
+    const product = await this.productRepository.findOne({
+      where: { id: dto.productId },
+    });
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+    if (product.status !== ProductStatus.ACTIVE) {
+      throw new BadRequestException('Product is not available for purchase');
+    }
+
+    // Tìm item có sẵn trong cart
+    let item = await this.cartItemRepository.findOne({
+      where: { cartId: cart.id, productId: dto.productId },
+    });
+
+    const newQuantity = (item?.quantity ?? 0) + dto.quantity;
+
+    if (newQuantity > product.stock) {
+      throw new BadRequestException(
+        `Insufficient stock. Available: ${product.stock}, in cart: ${item?.quantity ?? 0}`,
+      );
+    }
+
+    // Giá hiệu lực (salePrice nếu có, ngược lại price)
+    const effectivePrice = product.salePrice ?? product.price;
+
+    if (item) {
+      item.quantity = newQuantity;
+      await this.cartItemRepository.save(item);
+    } else {
+      item = this.cartItemRepository.create({
+        cartId: cart.id,
+        productId: dto.productId,
+        quantity: dto.quantity,
+        priceSnapshot: effectivePrice,
+      });
+      await this.cartItemRepository.save(item);
+    }
+
+    // Touch cart để cập nhật updatedAt
+    cart.updatedAt = new Date();
+    await this.cartRepository.save(cart);
+
+    await this.invalidateCache(cart.id);
+    this.logger.log(
+      `Cart item added: cart=${cart.id} product=${dto.productId} qty=${dto.quantity}`,
+    );
+
+    return this.getSummary(cart.id);
+  }
+
+  // ============================================================
+  // UPDATE ITEM
+  // ============================================================
+
+  async updateItem(
+    userId: string | null,
+    deviceId: string | null,
+    itemId: string,
+    dto: UpdateCartItemDto,
+  ): Promise<CartSummary> {
+    const cart = await this.getOrCreateCart(userId, deviceId);
+
+    const item = await this.cartItemRepository.findOne({
+      where: { id: itemId, cartId: cart.id },
+    });
+    if (!item) {
+      throw new NotFoundException('Cart item not found');
+    }
+
+    // quantity = 0 → xóa item
+    if (dto.quantity === 0) {
+      await this.cartItemRepository.remove(item);
+      await this.invalidateCache(cart.id);
+      return this.getSummary(cart.id);
+    }
+
+    const product = await this.productRepository.findOne({
+      where: { id: item.productId },
+    });
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+    if (dto.quantity > product.stock) {
+      throw new BadRequestException(
+        `Insufficient stock. Available: ${product.stock}`,
+      );
+    }
+
+    item.quantity = dto.quantity;
+    // Cập nhật snapshot giá mới (vì user đang chủ động thay đổi)
+    item.priceSnapshot = product.salePrice ?? product.price;
+    await this.cartItemRepository.save(item);
+
+    cart.updatedAt = new Date();
+    await this.cartRepository.save(cart);
+
+    await this.invalidateCache(cart.id);
+    return this.getSummary(cart.id);
+  }
+
+  // ============================================================
+  // REMOVE ITEM
+  // ============================================================
+
+  async removeItem(
+    userId: string | null,
+    deviceId: string | null,
+    itemId: string,
+  ): Promise<CartSummary> {
+    const cart = await this.getOrCreateCart(userId, deviceId);
+
+    const item = await this.cartItemRepository.findOne({
+      where: { id: itemId, cartId: cart.id },
+    });
+    if (!item) {
+      throw new NotFoundException('Cart item not found');
+    }
+
+    await this.cartItemRepository.remove(item);
+    await this.invalidateCache(cart.id);
+    return this.getSummary(cart.id);
+  }
+
+  // ============================================================
+  // CLEAR CART
+  // ============================================================
+
+  async clearCart(
+    userId: string | null,
+    deviceId: string | null,
+  ): Promise<{ message: string }> {
+    const cart = await this.getOrCreateCart(userId, deviceId);
+    await this.cartItemRepository.delete({ cartId: cart.id });
+    await this.invalidateCache(cart.id);
+    return { message: 'Cart cleared' };
+  }
+
+  // ============================================================
+  // GET SUMMARY
+  // ============================================================
+
+  /**
+   * Trả về summary của cart với cache Redis
+   */
+  async getSummary(cartId: string): Promise<CartSummary> {
+    // 1. Try cache
+    const cached = await this.redis.getJson<CartSummary>(this.cacheKey(cartId));
+    if (cached) return cached;
+
+    // 2. Load từ DB
+    const cart = await this.cartRepository.findOne({
+      where: { id: cartId },
+      relations: {
+        items: {
+          product: true,
+        },
+      },
+    });
+    if (!cart) throw new NotFoundException('Cart not found');
+
+    const summary = this.buildSummary(cart);
+
+    // 3. Cache
+    await this.redis.setJson(
+      this.cacheKey(cartId),
+      summary,
+      this.CART_CACHE_TTL,
+    );
+
+    return summary;
+  }
+
+  async getMyCart(
+    userId: string | null,
+    deviceId: string | null,
+  ): Promise<CartSummary> {
+    const cart = await this.getOrCreateCart(userId, deviceId);
+    return this.getSummary(cart.id);
+  }
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
+
+  private buildSummary(cart: Cart): CartSummary {
+    let subtotal = 0;
+    let discount = 0;
+    let totalQuantity = 0;
+
+    const items = (cart.items ?? []).map((item) => {
+      const product = item.product;
+      const currentPrice = Number(product.salePrice ?? product.price);
+      const snapshotPrice = Number(item.priceSnapshot);
+      const priceChanged = currentPrice !== snapshotPrice;
+
+      // Dùng giá hiện tại để tính tiền (giá user sẽ trả khi checkout)
+      const effectivePrice = currentPrice;
+      const originalPrice = Number(product.price);
+
+      const subtotalItem = effectivePrice * item.quantity;
+      const discountItem = (originalPrice - effectivePrice) * item.quantity;
+
+      subtotal += originalPrice * item.quantity;
+      discount += discountItem;
+      totalQuantity += item.quantity;
+
+      return {
+        id: item.id,
+        productId: product.id,
+        name: product.name,
+        image: product.images?.[0] ?? null,
+        price: originalPrice,
+        salePrice: product.salePrice ? Number(product.salePrice) : null,
+        quantity: item.quantity,
+        subtotal: subtotalItem,
+        priceChanged,
+        stockAvailable: product.stock,
+        inStock: product.stock >= item.quantity,
+      };
+    });
+
+    const total = subtotal - discount;
+
+    return {
+      id: cart.id,
+      items,
+      totalItems: items.length,
+      totalQuantity,
+      subtotal: this.round(subtotal),
+      discount: this.round(discount),
+      total: this.round(total),
+    };
+  }
+
+  private round(value: number): number {
+    return Math.round(value * 100) / 100;
+  }
+
+  // ============================================================
+  // MERGE GUEST CART → USER CART (khi login)
+  // ============================================================
+
+  /**
+   * Gộp cart của guest (deviceId) vào cart của user khi user login
+   * Gọi từ AuthService sau khi login thành công
+   */
+  async mergeGuestCart(userId: string, deviceId: string): Promise<CartSummary> {
+    const guestCart = await this.cartRepository.findOne({
+      where: { deviceId, status: CartStatus.ACTIVE, userId: IsNull() },
+      relations: {
+        items: true,
+      },
+    });
+
+    if (!guestCart || !guestCart.items?.length) {
+      // Không có guest cart → trả về user cart hiện tại
+      return this.getMyCart(userId, deviceId);
+    }
+
+    // Tìm hoặc tạo user cart
+    const userCart = await this.getOrCreateCart(userId, deviceId);
+
+    // Nếu guest cart trùng với user cart → xóa guest cart
+    if (userCart.id === guestCart.id) {
+      return this.getSummary(userCart.id);
+    }
+
+    // Merge từng item
+    for (const guestItem of guestCart.items) {
+      const existing = await this.cartItemRepository.findOne({
+        where: { cartId: userCart.id, productId: guestItem.productId },
+      });
+
+      if (existing) {
+        // Cộng quantity, cap ở stock hiện tại
+        const product = await this.productRepository.findOne({
+          where: { id: guestItem.productId },
+        });
+        const maxQty = product?.stock ?? existing.quantity;
+        existing.quantity = Math.min(
+          existing.quantity + guestItem.quantity,
+          maxQty,
+        );
+        await this.cartItemRepository.save(existing);
+      } else {
+        // Chuyển item sang user cart
+        guestItem.cartId = userCart.id;
+        await this.cartItemRepository.save(guestItem);
+      }
+    }
+
+    // Xóa guest cart
+    await this.cartRepository.remove(guestCart);
+    await this.invalidateCache(userCart.id);
+
+    this.logger.log(`Guest cart merged: device=${deviceId} → user=${userId}`);
+
+    return this.getSummary(userCart.id);
+  }
+
+  // ============================================================
+  // CHECKOUT (được gọi từ Order module sau này)
+  // ============================================================
+
+  /**
+   * Đánh dấu cart đã checkout → chuyển status
+   * Order module sẽ đọc snapshot cart rồi gọi hàm này
+   */
+  async markAsCheckedOut(cartId: string): Promise<Cart> {
+    const summary = await this.getSummary(cartId);
+    await this.cartRepository.update(cartId, {
+      status: CartStatus.CHECKED_OUT,
+      paymentStatus: CartPaymentStatus.UNPAID,
+      totalAmount: summary.total,
+    });
+    await this.invalidateCache(cartId);
+    return this.cartRepository.findOneByOrFail({ id: cartId });
+  }
+
+  /**
+   * Validate cart trước khi checkout
+   * Trả về danh sách lỗi (nếu có) để Order module quyết định
+   */
+  async validateForCheckout(cartId: string): Promise<{
+    valid: boolean;
+    errors: string[];
+  }> {
+    const cart = await this.cartRepository.findOne({
+      where: { id: cartId },
+      relations: {
+        items: {
+          product: true,
+        },
+      },
+    });
+    if (!cart) throw new NotFoundException('Cart not found');
+
+    const errors: string[] = [];
+
+    if (!cart.items?.length) {
+      errors.push('Cart is empty');
+    }
+
+    for (const item of cart.items ?? []) {
+      if (item.product.status !== ProductStatus.ACTIVE) {
+        errors.push(`Product "${item.product.name}" is not available`);
+      }
+      if (item.product.stock < item.quantity) {
+        errors.push(
+          `Product "${item.product.name}" only has ${item.product.stock} in stock`,
+        );
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+}
+</file>
+
+<file path="src/modules/payment/constants/payment.constant.ts">
+// src/modules/payment/constants/payment.constant.ts
+export enum PaymentProvider {
+  VNPAY = 'vnpay',
+  MOMO = 'momo',
+  COD = 'cod',
+}
+
+export enum PaymentStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  SUCCESS = 'success',
+  FAILED = 'failed',
+  REFUNDED = 'refunded',
+  CANCELLED = 'cancelled',
+}
+
+export enum CartPaymentStatus {
+  UNPAID = 'unpaid',
+  PAID = 'paid',
+  REFUNDED = 'refunded',
+}
+
+export const PAYMENT_CACHE_TTL = 300; // 5 phút
+export const WEBHOOK_IDEMPOTENCY_TTL = 7 * 24 * 60 * 60; // 7 ngày
+</file>
+
+<file path="src/modules/payment/dto/create-payment.dto.ts">
+// src/modules/payment/dto/create-payment.dto.ts
+import { IsEnum, IsNotEmpty, IsUUID } from 'class-validator';
+import { PaymentProvider } from '../constants/payment.constant';
+
+export class CreatePaymentDto {
+  @IsUUID()
+  @IsNotEmpty()
+  cartId!: string;
+
+  @IsEnum(PaymentProvider)
+  @IsNotEmpty()
+  provider!: PaymentProvider;
+}
+</file>
+
+<file path="src/modules/payment/entities/payment-transaction.entity.ts">
+// src/modules/payment/entities/payment-transaction.entity.ts
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { PaymentProvider, PaymentStatus } from '../constants/payment.constant';
+
+@Entity('payment_transactions')
+@Index(['cartId'])
+@Index(['provider', 'providerTransactionId'], { unique: true })
+@Index(['status', 'createdAt'])
+export class PaymentTransaction {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'cart_id', type: 'uuid' })
+  cartId!: string;
+
+  @Column({ name: 'user_id', type: 'uuid' })
+  userId!: string;
+
+  @Column({ name: 'provider', type: 'enum', enum: PaymentProvider })
+  provider!: PaymentProvider;
+
+  @Column({
+    name: 'provider_transaction_id',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  providerTransactionId!: string | null;
+
+  @Column({ name: 'amount', type: 'decimal', precision: 12, scale: 2 })
+  amount!: number;
+
+  @Column({
+    name: 'status',
+    type: 'enum',
+    enum: PaymentStatus,
+    default: PaymentStatus.PENDING,
+  })
+  status!: PaymentStatus;
+
+  @Column({ name: 'payment_url', type: 'text', nullable: true })
+  paymentUrl!: string | null;
+
+  @Column({ name: 'provider_response', type: 'jsonb', nullable: true })
+  providerResponse!: Record<string, any> | null;
+
+  @Column({ name: 'error_message', type: 'text', nullable: true })
+  errorMessage!: string | null;
+
+  @Column({ name: 'paid_at', type: 'timestamp', nullable: true })
+  paidAt!: Date | null;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt!: Date;
+}
+</file>
+
+<file path="src/modules/payment/gateways/momo.gateway.ts">
+// src/modules/payment/gateways/momo.gateway.ts
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHmac } from 'crypto';
+import { randomUUID } from 'crypto';
+import {
+  CreatePaymentParams,
+  CreatePaymentResult,
+  PaymentGateway,
+  WebhookVerifyResult,
+} from '../interfaces/payment-gateway.interface';
+
+@Injectable()
+export class MomoGateway implements PaymentGateway {
+  private readonly logger = new Logger(MomoGateway.name);
+
+  constructor(private readonly config: ConfigService) { }
+
+  async createPayment(
+    params: CreatePaymentParams,
+  ): Promise<CreatePaymentResult> {
+    const partnerCode = this.config.getOrThrow<string>('MOMO_PARTNER_CODE');
+    const accessKey = this.config.getOrThrow<string>('MOMO_ACCESS_KEY');
+    const secretKey = this.config.getOrThrow<string>('MOMO_SECRET_KEY');
+    const endpoint = this.config.getOrThrow<string>('MOMO_ENDPOINT');
+    const redirectUrl = this.config.getOrThrow<string>('MOMO_REDIRECT_URL');
+    const ipnUrl = this.config.getOrThrow<string>('MOMO_IPN_URL');
+
+    const requestId = randomUUID();
+    const orderId = params.orderId;
+    const amount = params.amount;
+    const orderInfo = params.orderInfo;
+    const requestType = 'payWithMethod';
+    const extraData = '';
+
+    const rawSignature =
+      `accessKey=${accessKey}` +
+      `&amount=${amount}` +
+      `&extraData=${extraData}` +
+      `&ipnUrl=${ipnUrl}` +
+      `&orderId=${orderId}` +
+      `&orderInfo=${orderInfo}` +
+      `&partnerCode=${partnerCode}` +
+      `&redirectUrl=${redirectUrl}` +
+      `&requestId=${requestId}` +
+      `&requestType=${requestType}`;
+
+    const signature = createHmac('sha256', secretKey)
+      .update(rawSignature)
+      .digest('hex');
+
+    const body = {
+      partnerCode,
+      partnerName: 'E-Commerce',
+      storeId: 'ECommerceStore',
+      requestId,
+      amount,
+      orderId,
+      orderInfo,
+      redirectUrl,
+      ipnUrl,
+      lang: 'vi',
+      extraData,
+      requestType,
+      signature,
+    };
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const result = await response.json();
+
+    if (result.resultCode !== 0) {
+      throw new Error(`Momo create payment failed: ${result.message}`);
+    }
+
+    return {
+      paymentUrl: result.payUrl,
+      providerTransactionId: result.requestId,
+    };
+  }
+
+  verifyWebhook(data: Record<string, any>): WebhookVerifyResult {
+    const accessKey = this.config.getOrThrow<string>('MOMO_ACCESS_KEY');
+    const secretKey = this.config.getOrThrow<string>('MOMO_SECRET_KEY');
+
+    const rawSignature =
+      `accessKey=${accessKey}` +
+      `&amount=${data.amount}` +
+      `&extraData=${data.extraData || ''}` +
+      `&message=${data.message}` +
+      `&orderId=${data.orderId}` +
+      `&orderInfo=${data.orderInfo}` +
+      `&orderType=${data.orderType}` +
+      `&partnerCode=${data.partnerCode}` +
+      `&payType=${data.payType}` +
+      `&requestId=${data.requestId}` +
+      `&responseTime=${data.responseTime}` +
+      `&resultCode=${data.resultCode}` +
+      `&transId=${data.transId}`;
+
+    const signature = createHmac('sha256', secretKey)
+      .update(rawSignature)
+      .digest('hex');
+
+    const isValid = signature === data.signature;
+    const isSuccess = isValid && data.resultCode === 0;
+
+    return {
+      isValid,
+      isSuccess,
+      orderId: data.orderId,
+      providerTransactionId: String(data.transId),
+      amount: Number(data.amount),
+      responseCode: String(data.resultCode),
+      message: data.message || '',
+      rawData: data,
+    };
+  }
+
+  buildWebhookResponse(success: boolean, message: string): any {
+    return { message };
+  }
+}
+</file>
+
+<file path="src/modules/payment/gateways/vnpay.gateway.ts">
+// src/modules/payment/gateways/vnpay.gateway.ts
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHmac } from 'crypto';
+import {
+  CreatePaymentParams,
+  CreatePaymentResult,
+  PaymentGateway,
+  WebhookVerifyResult,
+} from '../interfaces/payment-gateway.interface';
+
+@Injectable()
+export class VnpayGateway implements PaymentGateway {
+  private readonly logger = new Logger(VnpayGateway.name);
+
+  constructor(private readonly config: ConfigService) { }
+
+  async createPayment(
+    params: CreatePaymentParams,
+  ): Promise<CreatePaymentResult> {
+    const vnp_TmnCode = this.config.getOrThrow<string>('VNPAY_TMN_CODE');
+    const vnp_HashSecret = this.config.getOrThrow<string>('VNPAY_HASH_SECRET');
+    const vnp_Url = this.config.getOrThrow<string>('VNPAY_URL');
+
+    const date = new Date();
+    const createDate = this.formatDate(date);
+    const expireDate = this.formatDate(
+      new Date(date.getTime() + 15 * 60 * 1000),
+    );
+
+    const vnp_Params: Record<string, string> = {
+      vnp_Version: '2.1.0',
+      vnp_Command: 'pay',
+      vnp_TmnCode,
+      vnp_Locale: 'vn',
+      vnp_CurrCode: 'VND',
+      vnp_TxnRef: params.orderId,
+      vnp_OrderInfo: params.orderInfo,
+      vnp_OrderType: 'other',
+      vnp_Amount: String(Math.round(params.amount * 100)), // VNPay dùng đơn vị đồng * 100
+      vnp_ReturnUrl: params.returnUrl,
+      vnp_IpAddr: params.ipAddress,
+      vnp_CreateDate: createDate,
+      vnp_ExpireDate: expireDate,
+    };
+
+    // Sắp xếp params theo alphabet và tạo query string
+    const sortedKeys = Object.keys(vnp_Params).sort();
+    const signData = sortedKeys
+      .map(
+        (key) =>
+          `${key}=${encodeURIComponent(vnp_Params[key]).replace(/%20/g, '+')}`,
+      )
+      .join('&');
+
+    const hmac = createHmac('sha512', vnp_HashSecret);
+    const secureHash = hmac
+      .update(Buffer.from(signData, 'utf-8'))
+      .digest('hex');
+
+    const paymentUrl = `${vnp_Url}?${signData}&vnp_SecureHash=${secureHash}`;
+
+    return {
+      paymentUrl,
+      providerTransactionId: params.orderId,
+    };
+  }
+
+  verifyWebhook(data: Record<string, any>): WebhookVerifyResult {
+    const vnp_HashSecret = this.config.getOrThrow<string>('VNPAY_HASH_SECRET');
+    const secureHash = data['vnp_SecureHash'];
+
+    if (!secureHash) {
+      return this.invalidResult('Missing vnp_SecureHash');
+    }
+
+    // Copy params, remove hash fields
+    const params = { ...data };
+    delete params['vnp_SecureHash'];
+    delete params['vnp_SecureHashType'];
+
+    // Sort keys và build signData
+    const sortedKeys = Object.keys(params).sort();
+    const signData = sortedKeys
+      .map(
+        (key) =>
+          `${key}=${encodeURIComponent(params[key]).replace(/%20/g, '+')}`,
+      )
+      .join('&');
+
+    const hmac = createHmac('sha512', vnp_HashSecret);
+    const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
+
+    const isValid = secureHash === signed;
+    const responseCode = data['vnp_ResponseCode'];
+    const isSuccess = isValid && responseCode === '00';
+
+    return {
+      isValid,
+      isSuccess,
+      orderId: data['vnp_TxnRef'],
+      providerTransactionId: data['vnp_TransactionNo'],
+      amount: Number(data['vnp_Amount']) / 100,
+      responseCode,
+      message: data['vnp_Message'] || '',
+      rawData: data,
+    };
+  }
+
+  buildWebhookResponse(success: boolean, message: string): any {
+    return {
+      RspCode: success ? '00' : '99',
+      Message: message,
+    };
+  }
+
+  private invalidResult(message: string): WebhookVerifyResult {
+    return {
+      isValid: false,
+      isSuccess: false,
+      orderId: '',
+      providerTransactionId: '',
+      amount: 0,
+      responseCode: '',
+      message,
+      rawData: {},
+    };
+  }
+
+  private formatDate(date: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return (
+      date.getFullYear() +
+      pad(date.getMonth() + 1) +
+      pad(date.getDate()) +
+      pad(date.getHours()) +
+      pad(date.getMinutes()) +
+      pad(date.getSeconds())
+    );
+  }
+}
+</file>
+
+<file path="src/modules/payment/guards/webhook-ip.guard.ts">
+// src/modules/payment/guards/webhook-ip.guard.ts
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+
+@Injectable()
+export class WebhookIpGuard implements CanActivate {
+  private readonly logger = new Logger(WebhookIpGuard.name);
+  private readonly allowedIps: Record<string, string[]>;
+
+  constructor(private readonly config: ConfigService) {
+    this.allowedIps = {
+      vnpay: (this.config.get('VNPAY_WHITELIST_IPS') || '')
+        .split(',')
+        .filter(Boolean),
+      momo: (this.config.get('MOMO_WHITELIST_IPS') || '')
+        .split(',')
+        .filter(Boolean),
+    };
+  }
+
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest();
+    // ✅ Đọc provider từ URL path thay vì req.params
+    const provider = this.extractProvider(req.path);
+    const ip = this.normalizeIp(req.ip);
+
+    const whitelist = this.allowedIps[provider];
+    if (!whitelist || whitelist.length === 0) {
+      // Không cấu hình whitelist → bỏ qua (dựa vào signature)
+      return true;
+    }
+
+    if (!whitelist.includes(ip)) {
+      this.logger.warn(
+        `🚫 Webhook from unauthorized IP: ${ip} (provider=${provider})`,
+      );
+      throw new ForbiddenException('IP not allowed');
+    }
+
+    return true;
+  }
+
+  /**
+   * Trích provider từ path: /api/payments/vnpay/webhook → 'vnpay'
+   */
+  private extractProvider(path: string): string {
+    const parts = path.split('/').filter(Boolean);
+    // ['api', 'payments', 'vnpay', 'webhook']
+    const idx = parts.indexOf('payments');
+    return idx !== -1 && parts[idx + 1] ? parts[idx + 1] : '';
+  }
+
+  private normalizeIp(ip: string): string {
+    return ip.replace(/^::ffff:/, '');
+  }
+}
+</file>
+
+<file path="src/modules/payment/interfaces/payment-gateway.interface.ts">
+// src/modules/payment/interfaces/payment-gateway.interface.ts
+export interface CreatePaymentParams {
+  orderId: string;
+  amount: number;
+  orderInfo: string;
+  ipAddress: string;
+  returnUrl: string;
+}
+
+export interface CreatePaymentResult {
+  paymentUrl: string;
+  providerTransactionId: string;
+}
+
+export interface WebhookVerifyResult {
+  isValid: boolean;
+  isSuccess: boolean;
+  orderId: string;
+  providerTransactionId: string;
+  amount: number;
+  responseCode: string;
+  message: string;
+  rawData: Record<string, any>;
+}
+
+export interface PaymentGateway {
+  createPayment(params: CreatePaymentParams): Promise<CreatePaymentResult>;
+  verifyWebhook(data: Record<string, any>): WebhookVerifyResult;
+  buildWebhookResponse(success: boolean, message: string): any;
+}
+</file>
+
+<file path="src/modules/payment/payment.controller.ts">
+// src/modules/payment/payment.controller.ts
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Param,
+  Query,
+  Ip,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { PaymentService } from './payment.service';
+import { CreatePaymentDto } from './dto/create-payment.dto';
+import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';
+import { CurrentUser } from 'src/modules/auth/decorators/current-user.decorator';
+import { User } from '../user/user.entity';
+import { PaymentProvider } from './constants/payment.constant';
+import { WebhookIpGuard } from './guards/webhook-ip.guard';
+
+@Controller('payments')
+export class PaymentController {
+  private readonly logger = new Logger(PaymentController.name);
+
+  constructor(private readonly paymentService: PaymentService) { }
+
+  // ============================================================
+  // CREATE PAYMENT
+  // ============================================================
+  @Post('create')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  @HttpCode(HttpStatus.OK)
+  async createPayment(
+    @CurrentUser() user: User,
+    @Body() dto: CreatePaymentDto,
+    @Ip() ip: string,
+  ) {
+    return this.paymentService.createPayment(user.id, dto, ip);
+  }
+
+  // ============================================================
+  // WEBHOOK
+  // ============================================================
+  @Get('vnpay/webhook')
+  @UseGuards(WebhookIpGuard)
+  @HttpCode(HttpStatus.OK)
+  async vnpayWebhook(@Query() query: Record<string, any>, @Ip() ip: string) {
+    this.logger.log(`VNPay webhook received from ${ip}`);
+    return this.paymentService.handleWebhook(PaymentProvider.VNPAY, query, ip);
+  }
+
+  @Get('vnpay/return')
+  @HttpCode(HttpStatus.OK)
+  async vnpayReturn(
+    @Query() query: Record<string, any>,
+    @Ip() ip: string, // ✅ Dùng IP thật
+  ) {
+    return this.paymentService.handleWebhook(PaymentProvider.VNPAY, query, ip);
+  }
+
+  @Post('momo/webhook')
+  @UseGuards(WebhookIpGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async momoWebhook(@Body() body: Record<string, any>, @Ip() ip: string) {
+    this.logger.log(`Momo webhook received from ${ip}`);
+    await this.paymentService.handleWebhook(PaymentProvider.MOMO, body, ip);
+  }
+
+  @Get('momo/return')
+  @HttpCode(HttpStatus.OK)
+  async momoReturn(@Query() query: Record<string, any>, @Ip() ip: string) {
+    return this.paymentService.handleWebhook(PaymentProvider.MOMO, query, ip);
+  }
+
+  // ============================================================
+  // QUERY
+  // ============================================================
+  @Get('transactions/:id')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 60 } })
+  async getTransaction(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.paymentService.getTransaction(user.id, id);
+  }
+
+  @Get('carts/:cartId/transactions')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 60 } })
+  async getCartTransactions(
+    @CurrentUser() user: User,
+    @Param('cartId') cartId: string,
+  ) {
+    return this.paymentService.getTransactionsByCart(user.id, cartId);
+  }
+}
+</file>
+
+<file path="src/modules/payment/payment.module.ts">
+// src/modules/payment/payment.module.ts
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { PaymentTransaction } from './entities/payment-transaction.entity';
+import { Cart } from '../cart/cart.entity';
+import { PaymentService } from './payment.service';
+import { PaymentController } from './payment.controller';
+import { VnpayGateway } from './gateways/vnpay.gateway';
+import { MomoGateway } from './gateways/momo.gateway';
+import { WebhookIpGuard } from './guards/webhook-ip.guard';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([PaymentTransaction, Cart])],
+  providers: [PaymentService, VnpayGateway, MomoGateway, WebhookIpGuard],
+  controllers: [PaymentController],
+  exports: [PaymentService],
+})
+export class PaymentModule { }
+</file>
+
+<file path="src/modules/payment/payment.service.ts">
+// src/modules/payment/payment.service.ts
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import { RedisService } from 'src/infrastructure/redis/redis.service';
+import { PaymentTransaction } from './entities/payment-transaction.entity';
+import {
+  PaymentProvider,
+  PaymentStatus,
+  WEBHOOK_IDEMPOTENCY_TTL,
+} from './constants/payment.constant';
+import { Cart, CartStatus, CartPaymentStatus } from '../cart/cart.entity';
+import { VnpayGateway } from './gateways/vnpay.gateway';
+import { MomoGateway } from './gateways/momo.gateway';
+import { CreatePaymentDto } from './dto/create-payment.dto';
+import type { PaymentGateway } from './interfaces/payment-gateway.interface';
+
+@Injectable()
+export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+  private readonly gateways: Map<PaymentProvider, PaymentGateway>;
+
+  constructor(
+    @InjectRepository(PaymentTransaction)
+    private readonly paymentRepo: Repository<PaymentTransaction>,
+    @InjectRepository(Cart) // ✅ Cart thay Order
+    private readonly cartRepo: Repository<Cart>,
+    private readonly vnpayGateway: VnpayGateway,
+    private readonly momoGateway: MomoGateway,
+    private readonly redis: RedisService,
+    private readonly config: ConfigService,
+    private readonly dataSource: DataSource,
+  ) {
+    this.gateways = new Map<PaymentProvider, PaymentGateway>([
+      [PaymentProvider.VNPAY, this.vnpayGateway],
+      [PaymentProvider.MOMO, this.momoGateway],
+    ]);
+  }
+
+  // ============================================================
+  // CREATE PAYMENT
+  // ============================================================
+  async createPayment(
+    userId: string,
+    dto: CreatePaymentDto,
+    ipAddress: string,
+  ): Promise<{ paymentUrl: string; transactionId: string }> {
+    // 1. Verify cart (đã CHECKED_OUT)
+    const cart = await this.cartRepo.findOne({
+      where: {
+        id: dto.cartId,
+        userId,
+        status: CartStatus.CHECKED_OUT,
+      },
+    });
+    if (!cart) {
+      throw new NotFoundException('Cart not found or not checked out');
+    }
+    if (cart.paymentStatus === CartPaymentStatus.PAID) {
+      throw new ConflictException('Order already paid');
+    }
+
+    // 2. Check existing pending transaction
+    const existing = await this.paymentRepo.findOne({
+      where: { cartId: dto.cartId, status: PaymentStatus.PENDING },
+    });
+    if (existing?.paymentUrl) {
+      return {
+        paymentUrl: existing.paymentUrl,
+        transactionId: existing.id,
+      };
+    }
+
+    // 3. Get gateway
+    const gateway = this.gateways.get(dto.provider);
+    if (!gateway) {
+      throw new BadRequestException(`Unsupported provider: ${dto.provider}`);
+    }
+
+    // 4. Create transaction record
+    const transaction = this.paymentRepo.create({
+      cartId: cart.id,
+      userId,
+      provider: dto.provider,
+      amount: Number(cart.totalAmount),
+      status: PaymentStatus.PENDING,
+    });
+    await this.paymentRepo.save(transaction);
+
+    // 5. Call gateway
+    try {
+      const returnUrl = `${this.config.get('APP_URL')}/api/payments/${dto.provider}/return`;
+      const result = await gateway.createPayment({
+        orderId: cart.id, // dùng cartId làm orderId cho gateway
+        amount: Number(cart.totalAmount),
+        orderInfo: `Thanh toan don hang ${cart.id.slice(0, 8)}`,
+        ipAddress,
+        returnUrl,
+      });
+
+      transaction.paymentUrl = result.paymentUrl;
+      transaction.providerTransactionId = result.providerTransactionId;
+      transaction.status = PaymentStatus.PROCESSING;
+      await this.paymentRepo.save(transaction);
+
+      this.logger.log(
+        `Payment created: cart=${cart.id} provider=${dto.provider} tx=${transaction.id}`,
+      );
+
+      return {
+        paymentUrl: result.paymentUrl,
+        transactionId: transaction.id,
+      };
+    } catch (error) {
+      transaction.status = PaymentStatus.FAILED;
+      transaction.errorMessage = (error as Error).message;
+      await this.paymentRepo.save(transaction);
+      throw error;
+    }
+  }
+
+  // ============================================================
+  // WEBHOOK HANDLER
+  // ============================================================
+  async handleWebhook(
+    provider: PaymentProvider,
+    data: Record<string, any>,
+    ipAddress: string,
+  ): Promise<any> {
+    const gateway = this.gateways.get(provider);
+    if (!gateway) {
+      throw new BadRequestException(`Unsupported provider: ${provider}`);
+    }
+
+    // 1. VERIFY SIGNATURE
+    const verifyResult = gateway.verifyWebhook(data);
+    if (!verifyResult.isValid) {
+      this.logger.warn(
+        `⚠️ Invalid ${provider} signature from IP ${ipAddress}`,
+        { orderId: verifyResult.orderId },
+      );
+      return gateway.buildWebhookResponse(false, 'Invalid signature');
+    }
+
+    // 2. IDEMPOTENCY — SET NX atomic (chỉ 1 lần)
+    const idempotencyKey = `webhook:${provider}:${verifyResult.providerTransactionId}`;
+    const acquired = await this.redis.setNX(
+      idempotencyKey,
+      'processing',
+      WEBHOOK_IDEMPOTENCY_TTL,
+    );
+
+    if (!acquired) {
+      const status = await this.redis.get(idempotencyKey);
+      if (status === 'done') {
+        this.logger.log(
+          `Webhook already processed: ${provider} tx=${verifyResult.providerTransactionId}`,
+        );
+        return gateway.buildWebhookResponse(true, 'Already processed');
+      }
+      // Đang xử lý bởi request khác
+      return gateway.buildWebhookResponse(true, 'Processing');
+    }
+
+    // 3. FIND TRANSACTION
+    const transaction = await this.paymentRepo.findOne({
+      where: { cartId: verifyResult.orderId, provider },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!transaction) {
+      this.logger.error(
+        `Transaction not found: cart=${verifyResult.orderId} provider=${provider}`,
+      );
+      await this.redis.del(idempotencyKey); // release để retry
+      return gateway.buildWebhookResponse(false, 'Transaction not found');
+    }
+
+    // 4. VERIFY AMOUNT
+    if (Number(transaction.amount) !== verifyResult.amount) {
+      this.logger.error(
+        `Amount mismatch: expected=${transaction.amount} got=${verifyResult.amount}`,
+      );
+      await this.redis.del(idempotencyKey);
+      return gateway.buildWebhookResponse(false, 'Invalid amount');
+    }
+
+    // 5. ATOMIC UPDATE — state machine
+    const newStatus = verifyResult.isSuccess
+      ? PaymentStatus.SUCCESS
+      : PaymentStatus.FAILED;
+
+    try {
+      const result = await this.dataSource.transaction(async (manager) => {
+        const updateResult = await manager
+          .createQueryBuilder()
+          .update(PaymentTransaction)
+          .set({
+            status: newStatus,
+            providerTransactionId: verifyResult.providerTransactionId,
+            providerResponse: verifyResult.rawData,
+            paidAt: verifyResult.isSuccess ? new Date() : null,
+            errorMessage: verifyResult.isSuccess ? null : verifyResult.message,
+          })
+          .where('id = :id', { id: transaction.id })
+          .andWhere('status IN (:...statuses)', {
+            statuses: [PaymentStatus.PENDING, PaymentStatus.PROCESSING],
+          })
+          .execute();
+
+        if (updateResult.affected === 0) {
+          return { alreadyProcessed: true };
+        }
+
+        // ✅ Update Cart thay Order
+        if (verifyResult.isSuccess) {
+          await manager
+            .createQueryBuilder()
+            .update(Cart)
+            .set({
+              paymentStatus: CartPaymentStatus.PAID,
+              paidAt: new Date(),
+            })
+            .where('id = :id', { id: transaction.cartId })
+            .andWhere('payment_status = :status', {
+              status: CartPaymentStatus.UNPAID,
+            })
+            .execute();
+        }
+
+        return { alreadyProcessed: false };
+      });
+
+      if (result.alreadyProcessed) {
+        await this.redis.set(idempotencyKey, 'done', WEBHOOK_IDEMPOTENCY_TTL);
+        return gateway.buildWebhookResponse(true, 'Already processed');
+      }
+
+      // 6. Mark idempotency done
+      await this.redis.set(idempotencyKey, 'done', WEBHOOK_IDEMPOTENCY_TTL);
+
+      // 7. LOG
+      this.logger.log(
+        `✅ Webhook processed: ${provider} cart=${transaction.cartId} status=${newStatus}`,
+        {
+          transactionId: transaction.id,
+          providerTxId: verifyResult.providerTransactionId,
+          amount: verifyResult.amount,
+          ip: ipAddress,
+        },
+      );
+
+      // 8. RETURN
+      return gateway.buildWebhookResponse(true, 'Confirm Success');
+    } catch (error) {
+      // Release lock để gateway retry
+      await this.redis.del(idempotencyKey);
+      this.logger.error(
+        `❌ Webhook processing failed: ${provider} cart=${transaction.cartId}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  // ============================================================
+  // QUERY
+  // ============================================================
+  async getTransaction(userId: string, transactionId: string) {
+    const tx = await this.paymentRepo.findOne({
+      where: { id: transactionId, userId },
+    });
+    if (!tx) throw new NotFoundException('Transaction not found');
+    return tx;
+  }
+
+  async getTransactionsByCart(userId: string, cartId: string) {
+    return this.paymentRepo.find({
+      where: { cartId, userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+}
+</file>
+
+<file path="src/modules/product/dto/create-product.dto.ts">
+// src/modules/product/dto/create-product.dto.ts
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ProductStatus } from 'src/common/enums/product-status.enum';
+
+export class CreateProductDto {
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(2)
+  @MaxLength(255)
+  @Transform(({ value }) => value?.trim())
+  name!: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(5000)
+  description?: string;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  price!: number;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @IsOptional()
+  salePrice?: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  stock?: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  @Transform(({ value }) => value?.trim())
+  category!: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  @Transform(({ value }) => value?.trim())
+  brand?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  images?: string[];
+
+  @IsEnum(ProductStatus)
+  @IsOptional()
+  status?: ProductStatus;
+}
+</file>
+
+<file path="src/modules/product/dto/query-product.dto.ts">
+// src/modules/product/dto/query-product.dto.ts
+import { Type } from 'class-transformer';
+import {
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
+import { ProductStatus } from 'src/common/enums/product-status.enum';
+import { ProductSortBy } from 'src/common/enums/product-sort-by.enum';
+
+export class QueryProductDto {
+  @IsString()
+  @IsOptional()
+  search?: string;
+
+  @IsString()
+  @IsOptional()
+  category?: string;
+
+  @IsString()
+  @IsOptional()
+  brand?: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  minPrice?: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  maxPrice?: number;
+
+  @IsEnum(ProductStatus)
+  @IsOptional()
+  status?: ProductStatus;
+
+  @IsEnum(ProductSortBy)
+  @IsOptional()
+  sortBy?: ProductSortBy = ProductSortBy.CREATED_AT;
+
+  @IsString()
+  @IsOptional()
+  order?: 'ASC' | 'DESC' = 'DESC';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  page?: number = 1;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  @IsOptional()
+  limit?: number = 20;
+}
+</file>
+
+<file path="src/modules/product/dto/update-product.dto.ts">
+// src/modules/product/dto/update-product.dto.ts
+import { PartialType } from '@nestjs/mapped-types';
+import { CreateProductDto } from './create-product.dto';
+
+export class UpdateProductDto extends PartialType(CreateProductDto) { }
+</file>
+
+<file path="src/modules/product/product.controller.ts">
+// src/modules/product/product.controller.ts
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  UseGuards,
+  ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+
+import { ProductService } from './product.service';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
+import { QueryProductDto } from './dto/query-product.dto';
+import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';
+import { RolesGuard } from 'src/modules/auth/guards/roles.guard';
+import { Roles } from 'src/modules/auth/decorators/roles.decorator';
+import { UserRole } from 'src/common/enums/user-role.enum';
+import { Product } from './product.entity';
+
+@Controller('products')
+export class ProductController {
+  constructor(private readonly productService: ProductService) { }
+
+  // ============================================================
+  // PUBLIC — LIST & SEARCH
+  // ============================================================
+
+  /**
+   * Public: list sản phẩm với filter/search/sort/pagination
+   * Rate limit: 100 lần / phút
+   */
+  @Get()
+  @Throttle({ default: { ttl: 60_000, limit: 100 } })
+  async findAll(@Query() query: QueryProductDto) {
+    return await this.productService.findAll(query);
+  }
+
+  /**
+   * Public: xem chi tiết theo slug (SEO friendly)
+   * Rate limit: 100 lần / phút
+   */
+  @Get('slug/:slug')
+  @Throttle({ default: { ttl: 60_000, limit: 100 } })
+  async findBySlug(@Param('slug') slug: string) {
+    return await this.productService.findBySlug(slug);
+  }
+
+  /**
+   * Public: xem chi tiết theo id
+   * Rate limit: 100 lần / phút
+   */
+  @Get(':id')
+  @Throttle({ default: { ttl: 60_000, limit: 100 } })
+  async findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return await this.productService.findOne(id);
+  }
+
+  // ============================================================
+  // ADMIN — CRUD
+  // ============================================================
+
+  /**
+   * Admin tạo sản phẩm
+   * Rate limit: 30 lần / phút
+   */
+  @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  @HttpCode(HttpStatus.CREATED)
+  async create(@Body() dto: CreateProductDto) {
+    return await this.productService.create(dto);
+  }
+
+  /**
+   * Admin update sản phẩm
+   * Rate limit: 30 lần / phút
+   */
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  async update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateProductDto,
+  ) {
+    return await this.productService.update(id, dto);
+  }
+
+  /**
+   * Admin đổi status
+   * Rate limit: 30 lần / phút
+   */
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  async updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('status') status: Product['status'],
+  ) {
+    return await this.productService.update(id, { status });
+  }
+
+  /**
+   * Admin xóa sản phẩm
+   * Rate limit: 20 lần / phút
+   */
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Throttle({ default: { ttl: 60_000, limit: 20 } })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param('id', ParseUUIDPipe) id: string) {
+    await this.productService.remove(id);
+  }
+}
+</file>
+
+<file path="src/modules/product/product.entity.ts">
+// src/modules/product/product.entity.ts
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { ProductStatus } from 'src/common/enums/product-status.enum';
+
+@Entity('products')
+@Index(['status', 'createdAt'])
+@Index(['category'])
+export class Product {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'name', type: 'varchar', length: 255 })
+  name!: string;
+
+  @Column({
+    name: 'slug',
+    type: 'varchar',
+    length: 300,
+    unique: true,
+  })
+  slug!: string;
+
+  @Column({ name: 'description', type: 'text', nullable: true })
+  description!: string | null;
+
+  @Column({
+    name: 'price',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+  })
+  price!: number;
+
+  @Column({
+    name: 'sale_price',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  salePrice!: number | null;
+
+  @Column({ name: 'stock', type: 'int', default: 0 })
+  stock!: number;
+
+  @Column({ name: 'category', type: 'varchar', length: 100 })
+  category!: string;
+
+  @Column({ name: 'brand', type: 'varchar', length: 100, nullable: true })
+  brand!: string | null;
+
+  @Column({
+    name: 'images',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  images!: string[];
+
+  @Column({
+    name: 'status',
+    type: 'enum',
+    enum: ProductStatus,
+    default: ProductStatus.DRAFT,
+  })
+  status!: ProductStatus;
+
+  @Column({
+    name: 'rating',
+    type: 'decimal',
+    precision: 3,
+    scale: 2,
+    default: 0,
+  })
+  rating!: number;
+
+  @Column({ name: 'review_count', type: 'int', default: 0 })
+  reviewCount!: number;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt!: Date;
+}
+</file>
+
+<file path="src/modules/product/product.module.ts">
+// src/modules/product/product.module.ts
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Product } from './product.entity';
+import { ProductService } from './product.service';
+import { ProductController } from './product.controller';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([Product])],
+  providers: [ProductService],
+  controllers: [ProductController],
+  exports: [ProductService],
+})
+export class ProductModule { }
+</file>
+
+<file path="src/modules/product/product.service.ts">
+// src/modules/product/product.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Product } from './product.entity';
+import { ProductStatus } from 'src/common/enums/product-status.enum';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
+import { QueryProductDto } from './dto/query-product.dto';
+import { ProductSortBy } from 'src/common/enums/product-sort-by.enum';
+
+export interface PaginatedProducts {
+  data: Product[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+@Injectable()
+export class ProductService {
+  private readonly logger = new Logger(ProductService.name);
+
+  constructor(
+    @InjectRepository(Product)
+    private readonly productRepository: Repository<Product>,
+  ) { }
+
+  /**
+   * Sinh slug từ tên sản phẩm
+   */
+  private slugify(name: string): string {
+    return name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // bỏ dấu tiếng Việt
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+  }
+
+  /**
+   * Đảm bảo slug unique — thêm suffix nếu trùng
+   */
+  private async ensureUniqueSlug(
+    baseSlug: string,
+    excludeId?: string,
+  ): Promise<string> {
+    let slug = baseSlug;
+    let counter = 1;
+    while (true) {
+      const existing = await this.productRepository.findOne({
+        where: { slug },
+      });
+      if (!existing || existing.id === excludeId) return slug;
+      slug = `${baseSlug}-${counter++}`;
+    }
+  }
+
+  async create(dto: CreateProductDto): Promise<Product> {
+    const baseSlug = this.slugify(dto.name);
+    const slug = await this.ensureUniqueSlug(baseSlug);
+
+    // Validate salePrice < price
+    if (dto.salePrice && dto.salePrice >= dto.price) {
+      throw new BadRequestException('Sale price must be less than price');
+    }
+
+    const product = this.productRepository.create({
+      ...dto,
+      slug,
+      images: dto.images ?? [],
+      stock: dto.stock ?? 0,
+      status: dto.status ?? ProductStatus.DRAFT,
+      salePrice: dto.salePrice ?? null,
+      brand: dto.brand ?? null,
+      description: dto.description ?? null,
+    });
+
+    const saved = await this.productRepository.save(product);
+    this.logger.log(`Product created: ${saved.id} (${saved.slug})`);
+    return saved;
+  }
+
+  /**
+   * List với filter, search, sort, pagination
+   */
+  async findAll(query: QueryProductDto): Promise<PaginatedProducts> {
+    const {
+      search,
+      category,
+      brand,
+      minPrice,
+      maxPrice,
+      status,
+      sortBy = ProductSortBy.CREATED_AT,
+      order = 'DESC',
+      page = 1,
+      limit = 20,
+    } = query;
+
+    const qb = this.productRepository.createQueryBuilder('p');
+
+    if (search) {
+      qb.andWhere('(p.name ILIKE :search OR p.description ILIKE :search)', {
+        search: `%${search}%`,
+      });
+    }
+    if (category) qb.andWhere('p.category = :category', { category });
+    if (brand) qb.andWhere('p.brand = :brand', { brand });
+    if (status) qb.andWhere('p.status = :status', { status });
+    if (minPrice !== undefined)
+      qb.andWhere('p.price >= :minPrice', { minPrice });
+    if (maxPrice !== undefined)
+      qb.andWhere('p.price <= :maxPrice', { maxPrice });
+
+    const validSortFields = Object.values(ProductSortBy);
+    const sortField = validSortFields.includes(sortBy)
+      ? sortBy
+      : ProductSortBy.CREATED_AT;
+    qb.orderBy(`p.${sortField}`, order === 'ASC' ? 'ASC' : 'DESC');
+
+    const skip = (page - 1) * limit;
+    qb.skip(skip).take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async findOne(id: string): Promise<Product> {
+    const product = await this.productRepository.findOne({ where: { id } });
+    if (!product) {
+      throw new NotFoundException(`Product with ID "${id}" not found`);
+    }
+    return product;
+  }
+
+  async findBySlug(slug: string): Promise<Product> {
+    const product = await this.productRepository.findOne({ where: { slug } });
+    if (!product) {
+      throw new NotFoundException(`Product with slug "${slug}" not found`);
+    }
+    return product;
+  }
+
+  async update(id: string, dto: UpdateProductDto): Promise<Product> {
+    const product = await this.findOne(id);
+
+    // Validate salePrice nếu có
+    const newPrice = dto.price ?? Number(product.price);
+    const newSalePrice =
+      dto.salePrice !== undefined ? dto.salePrice : product.salePrice;
+    if (newSalePrice && newSalePrice >= newPrice) {
+      throw new BadRequestException('Sale price must be less than price');
+    }
+
+    // Đổi slug nếu đổi tên
+    if (dto.name && dto.name !== product.name) {
+      const baseSlug = this.slugify(dto.name);
+      product.slug = await this.ensureUniqueSlug(baseSlug, id);
+    }
+
+    Object.assign(product, dto);
+    const saved = await this.productRepository.save(product);
+    this.logger.log(`Product updated: ${saved.id}`);
+    return saved;
+  }
+
+  async remove(id: string): Promise<void> {
+    const product = await this.findOne(id);
+    await this.productRepository.remove(product);
+    this.logger.log(`Product removed: ${id}`);
+  }
+
+  /**
+   * Giảm stock khi đặt hàng (dùng cho Order module sau này)
+   */
+  async decreaseStock(id: string, quantity: number): Promise<Product> {
+    const product = await this.findOne(id);
+
+    if (product.stock < quantity) {
+      throw new BadRequestException(
+        `Insufficient stock. Available: ${product.stock}, requested: ${quantity}`,
+      );
+    }
+
+    product.stock -= quantity;
+    if (product.stock === 0 && product.status === ProductStatus.ACTIVE) {
+      product.status = ProductStatus.OUT_OF_STOCK;
+    }
+
+    return await this.productRepository.save(product);
+  }
+
+  /**
+   * Tăng stock (hoàn hàng khi hủy đơn)
+   */
+  async increaseStock(id: string, quantity: number): Promise<Product> {
+    const product = await this.findOne(id);
+    product.stock += quantity;
+    if (product.stock > 0 && product.status === ProductStatus.OUT_OF_STOCK) {
+      product.status = ProductStatus.ACTIVE;
+    }
+    return await this.productRepository.save(product);
   }
 }
 </file>
@@ -2110,6 +4555,9 @@ import { RedisModule } from './infrastructure/redis/redis.module';
 import { MailModule } from './infrastructure/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
+import { ProductModule } from './modules/product/product.module';
+import { CartModule } from './modules/cart/cart.module';
+import { PaymentModule } from './modules/payment/payment.module';
 
 @Module({
   imports: [
@@ -2179,6 +4627,9 @@ import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
     // ===========================
     UserModule,
     AuthModule,
+    ProductModule,
+    CartModule,
+    PaymentModule,
   ],
   providers: [
     // Global throttler guard — áp dụng cho MỌI route
@@ -2339,6 +4790,25 @@ OTP_LENGTH=6
 OTP_TTL_SECONDS=300
 OTP_MAX_ATTEMPTS=5
 OTP_RESEND_COOLDOWN=60
+
+# ===========================
+# VNPay
+# ===========================
+VNPAY_TMN_CODE=YOUR_TMN_CODE
+VNPAY_HASH_SECRET=YOUR_HASH_SECRET
+VNPAY_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+VNPAY_WHITELIST_IPS=
+
+# ===========================
+# Momo
+# ===========================
+MOMO_PARTNER_CODE=MOMO
+MOMO_ACCESS_KEY=YOUR_ACCESS_KEY
+MOMO_SECRET_KEY=YOUR_SECRET_KEY
+MOMO_ENDPOINT=https://test-payment.momo.vn/v2/gateway/api/create
+MOMO_REDIRECT_URL=http://localhost:3000/payment/return
+MOMO_IPN_URL=http://localhost:8080/api/payments/momo/webhook
+MOMO_WHITELIST_IPS=
 </file>
 
 <file path=".prettierrc">

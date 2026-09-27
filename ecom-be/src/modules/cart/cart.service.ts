@@ -6,8 +6,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, IsNull, FindOptionsWhere } from 'typeorm';
-import { Cart, CartStatus } from './cart.entity';
+import { Repository, DataSource, IsNull } from 'typeorm';
+import { Cart, CartStatus, CartPaymentStatus } from './cart.entity';
 import { CartItem } from './cart-item.entity';
 import { Product } from '../product/product.entity';
 import { ProductStatus } from 'src/common/enums/product-status.enum';
@@ -434,11 +434,15 @@ export class CartService {
    * Đánh dấu cart đã checkout → chuyển status
    * Order module sẽ đọc snapshot cart rồi gọi hàm này
    */
-  async markAsCheckedOut(cartId: string): Promise<void> {
+  async markAsCheckedOut(cartId: string): Promise<Cart> {
+    const summary = await this.getSummary(cartId);
     await this.cartRepository.update(cartId, {
       status: CartStatus.CHECKED_OUT,
+      paymentStatus: CartPaymentStatus.UNPAID,
+      totalAmount: summary.total,
     });
     await this.invalidateCache(cartId);
+    return this.cartRepository.findOneByOrFail({ id: cartId });
   }
 
   /**

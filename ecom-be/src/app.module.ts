@@ -14,6 +14,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { ProductModule } from './modules/product/product.module';
 import { CartModule } from './modules/cart/cart.module';
+import { PaymentModule } from './modules/payment/payment.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { CartModule } from './modules/cart/cart.module';
     AuthModule,
     ProductModule,
     CartModule,
+    PaymentModule,
   ],
   providers: [
     // Global throttler guard — áp dụng cho MỌI route
