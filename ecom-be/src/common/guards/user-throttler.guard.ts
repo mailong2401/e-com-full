@@ -8,17 +8,27 @@ import {
 } from '@nestjs/common';
 import { ThrottlerGuard, ThrottlerLimitDetail } from '@nestjs/throttler';
 import * as jwt from 'jsonwebtoken';
+import type { Request } from 'express';
 
 @Injectable()
 export class UserThrottlerGuard extends ThrottlerGuard {
   protected readonly logger = new Logger(UserThrottlerGuard.name);
 
   protected async getTracker(req: Record<string, any>): Promise<string> {
-    const authHeader = req.headers?.authorization;
+    // 1. Thử đọc từ cookie trước
+    const request = req as Request;
+    const cookieToken = request.cookies?.['accessToken'];
 
-    if (authHeader?.startsWith('Bearer ')) {
+    // 2. Fallback: header Authorization (mobile, swagger)
+    const authHeader = req.headers?.authorization;
+    const bearerToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+
+    const token = cookieToken ?? bearerToken;
+
+    if (token) {
       try {
-        const token = authHeader.slice(7);
         const decoded = jwt.decode(token) as {
           sub?: string;
           role?: string;
@@ -30,7 +40,9 @@ export class UserThrottlerGuard extends ThrottlerGuard {
         if (decoded?.sub) {
           return `user:${decoded.sub}`;
         }
-      } catch { }
+      } catch {
+        // ignore
+      }
     }
 
     return `ip:${req.ip}`;

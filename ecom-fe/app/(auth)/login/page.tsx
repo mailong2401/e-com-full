@@ -29,11 +29,17 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const { tokens, user } = await authService.login({ email, password });
-      authService.saveTokens(tokens);
+      const { user } = await authService.login({ email, password });
+      // Không có token để lưu — cookie đã tự set
 
-      // Redirect theo role
-      router.push(user.role === 'admin' ? '/admin' : '/');
+      // Gọi merge guest cart
+      try {
+        await api.post('/carts/merge');
+      } catch {
+        // bỏ qua nếu không có guest cart
+      }
+
+      router.push(user.role === 'admin' ? '/dashboard' : '/');
     } catch (err: any) {
       setError(
         err.response?.data?.message ||

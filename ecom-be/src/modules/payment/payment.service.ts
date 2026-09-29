@@ -30,7 +30,7 @@ export class PaymentService {
   constructor(
     @InjectRepository(PaymentTransaction)
     private readonly paymentRepo: Repository<PaymentTransaction>,
-    @InjectRepository(Cart) // ✅ Cart thay Order
+    @InjectRepository(Cart)
     private readonly cartRepo: Repository<Cart>,
     private readonly vnpayGateway: VnpayGateway,
     private readonly momoGateway: MomoGateway,
@@ -219,7 +219,7 @@ export class PaymentService {
           return { alreadyProcessed: true };
         }
 
-        // ✅ Update Cart thay Order
+        // Update Cart thay Order
         if (verifyResult.isSuccess) {
           await manager
             .createQueryBuilder()

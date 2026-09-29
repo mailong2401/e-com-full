@@ -33,10 +33,9 @@ function VerifyOtpContent() {
 
     try {
       if (purpose === 'register') {
-        const { user, tokens } = await authService.verifyRegisterOtp(email, otp);
-        authService.saveTokens(tokens);
+        const { user } = await authService.verifyRegisterOtp(email, otp);
         sessionStorage.removeItem('pendingEmail');
-        router.push(user.role === 'admin' ? '/admin' : '/');
+        router.push(user.role === 'admin' ? '/dashboard' : '/');
       }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Xác thực thất bại');

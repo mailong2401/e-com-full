@@ -20,14 +20,22 @@ import { UserRole } from 'src/common/enums/user-role.enum';
 import { TokenPayload } from './interface/token-payload.interface';
 import { AuthResponse } from './interface/auth-response.interface';
 import { RefreshResponse } from './interface/refresh-response.interface';
+import { randomBytes } from 'crypto';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  private readonly ACCESS_COOKIE_NAME = 'accessToken';
   private readonly REFRESH_COOKIE_NAME = 'refreshToken';
   private readonly DEVICE_COOKIE_NAME = 'deviceId';
+  private readonly CSRF_COOKIE_NAME = 'csrfToken';
+
+  private readonly COOKIE_PATH = '/';
   private readonly REFRESH_COOKIE_PATH = '/api/auth';
+  private readonly REFRESH_PATH = '/api/auth';
+
+  private readonly ACCESS_TTL_MS = 15 * 60 * 1000; // 15 phút
   private readonly REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
   constructor(
@@ -118,7 +126,7 @@ export class AuthService {
     );
 
     if (!isValid) {
-      // ⚠️ Token reuse hoặc session hết hạn → revoke hết
+      //Token reuse hoặc session hết hạn → revoke hết
       this.logger.warn(
         `Possible token reuse: user=${userId} device=${deviceId} — revoking all sessions`,
       );
@@ -138,9 +146,9 @@ export class AuthService {
     const accessToken = await this.signAccessToken(user);
 
     // 4. Set cookie mới
-    this.setAuthCookies(res, newRefreshToken, deviceId);
+    this.setAuthCookies(res, accessToken, newRefreshToken, deviceId);
 
-    return { accessToken };
+    return { message: 'Token refreshed' };
   }
 
   async logout(
@@ -189,10 +197,10 @@ export class AuthService {
     );
 
     const accessToken = await this.signAccessToken(user);
-    this.setAuthCookies(res, refreshToken, deviceId);
+    this.setAuthCookies(res, accessToken, refreshToken, deviceId);
 
     const { password, ...userWithoutPassword } = user;
-    return { user: userWithoutPassword, accessToken };
+    return { user: userWithoutPassword };
   }
 
   /**
@@ -219,6 +227,7 @@ export class AuthService {
    */
   private setAuthCookies(
     res: Response,
+    accessToken: string,
     refreshToken: string,
     deviceId: string,
   ): void {
@@ -233,10 +242,34 @@ export class AuthService {
       path: this.REFRESH_COOKIE_PATH,
     };
 
-    res.cookie(this.REFRESH_COOKIE_NAME, refreshToken, baseOptions);
+    res.cookie(this.ACCESS_COOKIE_NAME, accessToken, {
+      ...baseOptions,
+      maxAge: this.ACCESS_TTL_MS,
+      path: '/',
+    });
+
+    // 2. Refresh token — chỉ gửi cho /api/auth/*
+    res.cookie(this.REFRESH_COOKIE_NAME, refreshToken, {
+      ...baseOptions,
+      maxAge: this.REFRESH_TTL_MS,
+      path: this.REFRESH_PATH,
+    });
+
+    // 3. Device ID — non-httpOnly (frontend cần đọc để gửi header)
     res.cookie(this.DEVICE_COOKIE_NAME, deviceId, {
       ...baseOptions,
-      httpOnly: false, // client có thể đọc để debug / hiển thị
+      httpOnly: false,
+      maxAge: this.REFRESH_TTL_MS,
+      path: '/',
+    });
+
+    // 4. CSRF token — non-httpOnly (frontend phải đọc để gửi header)
+    const csrfToken = randomBytes(32).toString('hex');
+    res.cookie(this.CSRF_COOKIE_NAME, csrfToken, {
+      ...baseOptions,
+      httpOnly: false,
+      maxAge: this.REFRESH_TTL_MS,
+      path: '/',
     });
   }
 
@@ -244,9 +277,10 @@ export class AuthService {
    * Clear cookie khi logout / revoke
    */
   private clearAuthCookies(res: Response): void {
-    const opts = { path: this.REFRESH_COOKIE_PATH };
-    res.clearCookie(this.REFRESH_COOKIE_NAME, opts);
-    res.clearCookie(this.DEVICE_COOKIE_NAME, opts);
+    res.clearCookie(this.ACCESS_COOKIE_NAME, { path: '/' });
+    res.clearCookie(this.REFRESH_COOKIE_NAME, { path: this.REFRESH_PATH });
+    res.clearCookie(this.DEVICE_COOKIE_NAME, { path: '/' });
+    res.clearCookie(this.CSRF_COOKIE_NAME, { path: '/' });
   }
   async resolveRefreshToken(
     refreshToken: string,

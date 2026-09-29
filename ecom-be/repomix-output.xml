@@ -3174,7 +3174,7 @@ export class PaymentService {
   constructor(
     @InjectRepository(PaymentTransaction)
     private readonly paymentRepo: Repository<PaymentTransaction>,
-    @InjectRepository(Cart) // ✅ Cart thay Order
+    @InjectRepository(Cart)
     private readonly cartRepo: Repository<Cart>,
     private readonly vnpayGateway: VnpayGateway,
     private readonly momoGateway: MomoGateway,

@@ -15,6 +15,7 @@ import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { ProductModule } from './modules/product/product.module';
 import { CartModule } from './modules/cart/cart.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { CsrfGuard } from './common/guards/csrf.guard';
 
 @Module({
   imports: [
@@ -95,6 +96,7 @@ import { PaymentModule } from './modules/payment/payment.module';
       provide: APP_GUARD,
       useClass: UserThrottlerGuard,
     },
+    { provide: APP_GUARD, useClass: CsrfGuard },
   ],
 })
 export class AppModule { }

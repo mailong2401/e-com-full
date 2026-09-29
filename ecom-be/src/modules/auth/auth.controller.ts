@@ -43,7 +43,7 @@ export class AuthController {
    * Rate limit: 5 lần / 15 phút — chống brute force password
    */
   @Post('login')
-  @Throttle({ default: { ttl: 900_000, limit: 5 } }) // 15p / 5 lần
+  @Throttle({ default: { ttl: 900_000, limit: 100 } }) // 15p / 5 lần
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() loginDto: LoginDto,

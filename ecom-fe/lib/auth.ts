@@ -1,4 +1,4 @@
-// lib/auth.ts
+// ecom-fe/lib/auth.ts
 import { api } from './api';
 
 export interface RegisterPayload {
@@ -15,11 +15,6 @@ export interface LoginPayload {
   password: string;
 }
 
-export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
-}
-
 export interface User {
   id: string;
   firstName: string;
@@ -28,7 +23,21 @@ export interface User {
   username: string;
   role: 'user' | 'admin';
   avatar?: string | null;
+  isVerified: boolean;
+  phone?: string | null;
 }
+
+export interface AuthResponse {
+  user: User;
+  // Không còn accessToken — đã nằm trong cookie
+}
+
+// Helper: đọc cookie (dùng để biết user đã login chưa)
+const hasAuthCookie = (): boolean => {
+  if (typeof document === 'undefined') return false;
+  return /(^|;\s*)accessToken=/.test(document.cookie) ||
+    /(^|;\s*)refreshToken=/.test(document.cookie);
+};
 
 export const authService = {
   register: async (payload: RegisterPayload) => {
@@ -40,11 +49,11 @@ export const authService = {
   },
 
   verifyRegisterOtp: async (email: string, otp: string) => {
-    const { data } = await api.post<{ user: User; tokens: AuthTokens }>(
+    const { data } = await api.post<AuthResponse>(
       '/auth/register/verify-otp',
       { email, otp, purpose: 'register' },
     );
-    return data;
+    return data; // { user }
   },
 
   resendOtp: async (email: string, purpose: string) => {
@@ -56,20 +65,13 @@ export const authService = {
   },
 
   login: async (payload: LoginPayload) => {
-    const { data } = await api.post<{ user: User; tokens: AuthTokens }>(
-      '/auth/login',
-      payload,
-    );
-    return data;
+    const { data } = await api.post<AuthResponse>('/auth/login', payload);
+    return data; // { user }
   },
 
   logout: async () => {
-    try {
-      await api.post('/auth/logout');
-    } finally {
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-    }
+    await api.post('/auth/logout');
+    // Cookie đã bị backend clear
   },
 
   getProfile: async () => {
@@ -77,14 +79,8 @@ export const authService = {
     return data;
   },
 
-  saveTokens: (tokens: AuthTokens) => {
-    localStorage.setItem('accessToken', tokens.accessToken);
-    localStorage.setItem('refreshToken', tokens.refreshToken);
-  },
+  // "Đã login" = có cookie hay không (chỉ là gợi ý, backend vẫn verify)
+  isAuthenticated: () => hasAuthCookie(),
 
-  getAccessToken: () =>
-    typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null,
-
-  isAuthenticated: () =>
-    typeof window !== 'undefined' && !!localStorage.getItem('accessToken'),
+  // Không còn saveTokens / getAccessToken
 };
