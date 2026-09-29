@@ -16,9 +16,12 @@ import {
 } from '@radix-ui/themes';
 import { EnvelopeClosedIcon, LockClosedIcon } from '@radix-ui/react-icons';
 import { authService } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
+import { safeRedirect } from '@/lib/routes';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { setUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,7 +34,8 @@ export default function LoginPage() {
 
     try {
       const { user } = await authService.login({ email, password });
-      // Không có token để lưu — cookie đã tự set
+      // Cookie đã được backend set → cập nhật state để header đổi ngay
+      setUser(user);
 
       // Gọi merge guest cart
       try {
@@ -40,7 +44,10 @@ export default function LoginPage() {
         // bỏ qua nếu không có guest cart
       }
 
-      router.push(user.role === 'admin' ? '/dashboard' : '/');
+      const redirect = safeRedirect(
+        new URLSearchParams(window.location.search).get('redirect'),
+      );
+      router.replace(redirect ?? (user.role === 'admin' ? '/dashboard' : '/'));
     } catch (err: any) {
       setError(
         err.response?.data?.message ||

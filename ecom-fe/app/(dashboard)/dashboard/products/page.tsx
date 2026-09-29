@@ -1,7 +1,7 @@
 // ecom-fe/app/(dashboard)/dashboard/products/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Heading,
   Table,
@@ -40,28 +40,42 @@ interface PaginatedProducts {
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState(''); // giá trị ô nhập
+  const [search, setSearch] = useState(''); // giá trị đã debounce dùng để gọi API
+  const requestId = useRef(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
+    const id = ++requestId.current;
     setLoading(true);
     try {
       const { data } = await api.get<PaginatedProducts>('/products', {
-        params: { search, page, limit: 10 },
+        params: { search: search || undefined, page, limit: 10 },
       });
+      if (id !== requestId.current) return; // bỏ kết quả của request cũ
       setProducts(data.data);
       setTotalPages(data.meta.totalPages);
     } catch (error) {
+      if (id !== requestId.current) return;
       console.error('Failed to fetch products', error);
     } finally {
-      setLoading(false);
+      if (id === requestId.current) setLoading(false);
     }
-  };
+  }, [search, page]);
+
+  // Debounce ô tìm kiếm: không gọi API mỗi lần gõ phím
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   useEffect(() => {
     fetchProducts();
-  }, [search, page]);
+  }, [fetchProducts]);
 
   const handleDelete = async (id: string) => {
     if (!confirm('Bạn có chắc chắn muốn xóa sản phẩm này?')) return;
@@ -87,8 +101,8 @@ export default function ProductsPage() {
         <Flex p="4" justify="between">
           <TextField.Root
             placeholder="Tìm kiếm sản phẩm..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             style={{ width: '300px' }}
           >
             <TextField.Slot>

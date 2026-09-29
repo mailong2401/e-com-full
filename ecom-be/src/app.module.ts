@@ -58,7 +58,7 @@ import { CsrfGuard } from './common/guards/csrf.guard';
           {
             name: 'default',
             ttl: 60_000, // 1 phút
-            limit: 100, // 100 requests/phút cho mọi route không override
+            limit: 10000, // 100 requests/phút cho mọi route không override
           },
         ],
         // Redis storage → shared counter cho tất cả instance
@@ -92,10 +92,10 @@ import { CsrfGuard } from './common/guards/csrf.guard';
   providers: [
     // Global throttler guard — áp dụng cho MỌI route
     // Custom guard: track theo userId nếu đã login, fallback về IP
-    {
-      provide: APP_GUARD,
-      useClass: UserThrottlerGuard,
-    },
+    // {
+    //   provide: APP_GUARD,
+    //   useClass: UserThrottlerGuard,
+    // },
     { provide: APP_GUARD, useClass: CsrfGuard },
   ],
 })

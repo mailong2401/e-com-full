@@ -64,7 +64,7 @@ export class AuthController {
    * Rate limit: 3 lần / giờ — chống spam email
    */
   @Post('register/send-otp')
-  @Throttle({ default: { ttl: 3_600_000, limit: 3 } }) // 1h / 3 lần
+  @Throttle({ default: { ttl: 3_600, limit: 200 } }) // 1h / 3 lần
   @HttpCode(HttpStatus.CREATED)
   async registerSendOtp(@Body() dto: RegisterDto) {
     return this.authService.registerWithOtp(dto);

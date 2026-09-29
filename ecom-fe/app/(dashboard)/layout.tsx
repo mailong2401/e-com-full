@@ -17,16 +17,16 @@ import {
 import {
   HomeIcon,
   CubeIcon,
-  PersonIcon,
   ExitIcon,
   HamburgerMenuIcon,
 } from '@radix-ui/react-icons';
-import { authService, User } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 
 const navItems = [
   { href: '/dashboard', label: 'Tổng quan', icon: <HomeIcon /> },
   { href: '/dashboard/products', label: 'Sản phẩm', icon: <CubeIcon /> },
-  { href: '/dashboard/users', label: 'Người dùng', icon: <PersonIcon /> },
+  // TODO: bật lại khi có trang /dashboard/users (hiện đang 404)
+  // { href: '/dashboard/users', label: 'Người dùng', icon: <PersonIcon /> },
 ];
 
 export default function DashboardLayout({
@@ -36,43 +36,18 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Dùng chung state auth của AuthProvider → không tự gọi /auth/profile lần nữa
+  const { user, loading, logout } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const profile = await authService.getProfile();
-        if (profile.role !== 'admin') {
-          router.push('/');
-          return;
-        }
-        setUser(profile);
-      } catch (error) {
-        // 401 → interceptor đã thử refresh, vẫn fail → chuyển login
-        router.push('/login');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const handleLogout = async () => {
-      try {
-        await authService.logout();
-      } catch {
-        // dù lỗi vẫn chuyển về login
-      }
-      router.push('/login');
-    };
-
-    checkAuth();
-  }, [router]);
-
-  const handleLogout = async () => {
-    await authService.logout();
-    router.push('/login');
-  };
+    if (loading) return;
+    if (!user) {
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+    } else if (user.role !== 'admin') {
+      router.replace('/');
+    }
+  }, [loading, user, pathname, router]);
 
   if (loading) {
     return (
@@ -82,9 +57,13 @@ export default function DashboardLayout({
     );
   }
 
-  if (!user) {
-    return null; // Sẽ được chuyển hướng bởi useEffect
-  }
+  // Đang chờ redirect (chưa đăng nhập / không phải admin)
+  if (!user || user.role !== 'admin') return null;
+
+  const isActive = (href: string) =>
+    href === '/dashboard'
+      ? pathname === href
+      : pathname === href || pathname.startsWith(href + '/');
 
   return (
     <Flex style={{ minHeight: '100vh' }}>
@@ -120,26 +99,27 @@ export default function DashboardLayout({
         <Separator size="4" />
         <Flex direction="column" gap="2">
           {navItems.map((item) => (
-            <Link key={item.href} href={item.href} passHref>
-              <Button
-                variant={pathname === item.href ? 'solid' : 'ghost'}
-                style={{
-                  width: '100%',
-                  justifyContent: 'flex-start',
-                  padding: '10px',
-                }}
-              >
+            <Button
+              key={item.href}
+              asChild
+              variant={isActive(item.href) ? 'solid' : 'ghost'}
+              style={{
+                width: '100%',
+                justifyContent: 'flex-start',
+                padding: '10px',
+              }}
+            >
+              <Link href={item.href}>
                 {item.icon}
                 {isSidebarOpen && <Text ml="2">{item.label}</Text>}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           ))}
         </Flex>
       </Box>
 
       {/* Main Content */}
       <Flex direction="column" style={{ flex: 1 }}>
-        {/* Header */}
         <Flex
           align="center"
           justify="between"
@@ -148,7 +128,9 @@ export default function DashboardLayout({
         >
           <Heading size="4">Dashboard</Heading>
           <Flex align="center" gap="3">
-            <Text size="2">{user.firstName} {user.lastName}</Text>
+            <Text size="2">
+              {user.firstName} {user.lastName}
+            </Text>
             <DropdownMenu.Root>
               <DropdownMenu.Trigger>
                 <Button variant="soft">
@@ -165,7 +147,7 @@ export default function DashboardLayout({
                   Hồ sơ
                 </DropdownMenu.Item>
                 <DropdownMenu.Separator />
-                <DropdownMenu.Item color="red" onSelect={handleLogout}>
+                <DropdownMenu.Item color="red" onSelect={logout}>
                   <ExitIcon /> Đăng xuất
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
@@ -173,7 +155,6 @@ export default function DashboardLayout({
           </Flex>
         </Flex>
 
-        {/* Page Content */}
         <Box p="6" style={{ flex: 1, backgroundColor: 'var(--gray-1)' }}>
           {children}
         </Box>

@@ -3,9 +3,11 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Box, Card, Flex, Heading, Text, TextField, Button, Callout } from '@radix-ui/themes';
 import { authService } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 
 function VerifyOtpContent() {
   const router = useRouter();
+  const { setUser } = useAuth();
   const searchParams = useSearchParams();
   const purpose = searchParams.get('purpose') || 'register';
 
@@ -35,7 +37,8 @@ function VerifyOtpContent() {
       if (purpose === 'register') {
         const { user } = await authService.verifyRegisterOtp(email, otp);
         sessionStorage.removeItem('pendingEmail');
-        router.push(user.role === 'admin' ? '/dashboard' : '/');
+        setUser(user);
+        router.replace(user.role === 'admin' ? '/dashboard' : '/');
       }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Xác thực thất bại');

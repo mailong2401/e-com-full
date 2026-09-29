@@ -9,6 +9,10 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 
+# NEXT_PUBLIC_* được nhúng lúc build → phải có trước pnpm build
+ARG NEXT_PUBLIC_API_URL=/api
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 RUN pnpm build
 
 

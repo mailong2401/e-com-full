@@ -1,5 +1,5 @@
 // ecom-fe/lib/auth.ts
-import { api } from './api';
+import { api, hasSessionHint } from './api';
 
 export interface RegisterPayload {
   firstName: string;
@@ -29,15 +29,10 @@ export interface User {
 
 export interface AuthResponse {
   user: User;
-  // Không còn accessToken — đã nằm trong cookie
 }
 
-// Helper: đọc cookie (dùng để biết user đã login chưa)
-const hasAuthCookie = (): boolean => {
-  if (typeof document === 'undefined') return false;
-  return /(^|;\s*)accessToken=/.test(document.cookie) ||
-    /(^|;\s*)refreshToken=/.test(document.cookie);
-};
+// Dùng chung 1 request đang bay (tránh gọi 2 lần do React StrictMode / nhiều component)
+let profilePromise: Promise<User> | null = null;
 
 export const authService = {
   register: async (payload: RegisterPayload) => {
@@ -49,11 +44,12 @@ export const authService = {
   },
 
   verifyRegisterOtp: async (email: string, otp: string) => {
-    const { data } = await api.post<AuthResponse>(
-      '/auth/register/verify-otp',
-      { email, otp, purpose: 'register' },
-    );
-    return data; // { user }
+    const { data } = await api.post<AuthResponse>('/auth/register/verify-otp', {
+      email,
+      otp,
+      purpose: 'register',
+    });
+    return data;
   },
 
   resendOtp: async (email: string, purpose: string) => {
@@ -66,21 +62,25 @@ export const authService = {
 
   login: async (payload: LoginPayload) => {
     const { data } = await api.post<AuthResponse>('/auth/login', payload);
-    return data; // { user }
+    return data;
   },
 
   logout: async () => {
     await api.post('/auth/logout');
-    // Cookie đã bị backend clear
   },
 
-  getProfile: async () => {
-    const { data } = await api.get<User>('/auth/profile');
-    return data;
+  getProfile: (): Promise<User> => {
+    if (!profilePromise) {
+      profilePromise = api
+        .get<User>('/auth/profile')
+        .then((res) => res.data)
+        .finally(() => {
+          profilePromise = null;
+        });
+    }
+    return profilePromise;
   },
 
-  // "Đã login" = có cookie hay không (chỉ là gợi ý, backend vẫn verify)
-  isAuthenticated: () => hasAuthCookie(),
-
-  // Không còn saveTokens / getAccessToken
+  // Chỉ là gợi ý; backend vẫn là nơi verify thật
+  hasSession: () => hasSessionHint(),
 };
