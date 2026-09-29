@@ -54,6 +54,7 @@ ecom-be/
       exceptions/
         too-many-requests.exception.ts
       guards/
+        csrf.guard.ts
         user-throttler.guard.ts
       interfaces/
         otp-payload.interface.ts
@@ -202,405 +203,6 @@ docker-compose.yml
 <files>
 This section contains the contents of the repository's files.
 
-<file path="ecom-fe/app/(dashboard)/dashboard/products/page.tsx">
-// ecom-fe/app/(dashboard)/dashboard/products/page.tsx
-'use client';
-
-import { useState, useEffect } from 'react';
-import {
-  Heading,
-  Table,
-  Button,
-  Flex,
-  Box,
-  Text,
-  Badge,
-  TextField,
-  IconButton,
-} from '@radix-ui/themes';
-import { PlusIcon, MagnifyingGlassIcon, Pencil1Icon, TrashIcon } from '@radix-ui/react-icons';
-import { api } from '@/lib/api';
-
-// Định nghĩa kiểu dữ liệu cho Product (dựa trên backend)
-interface Product {
-  id: string;
-  name: string;
-  price: number;
-  stock: number;
-  status: 'draft' | 'active' | 'inactive' | 'out_of_stock';
-  category: string;
-  createdAt: string;
-}
-
-interface PaginatedProducts {
-  data: Product[];
-  meta: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
-}
-
-export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-
-  const fetchProducts = async () => {
-    setLoading(true);
-    try {
-      const { data } = await api.get<PaginatedProducts>('/products', {
-        params: { search, page, limit: 10 },
-      });
-      setProducts(data.data);
-      setTotalPages(data.meta.totalPages);
-    } catch (error) {
-      console.error('Failed to fetch products', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchProducts();
-  }, [search, page]);
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Bạn có chắc chắn muốn xóa sản phẩm này?')) return;
-    try {
-      await api.delete(`/products/${id}`);
-      fetchProducts(); // Tải lại danh sách
-    } catch (error) {
-      console.error('Failed to delete product', error);
-      alert('Xóa sản phẩm thất bại.');
-    }
-  };
-
-  return (
-    <Flex direction="column" gap="5">
-      <Flex justify="between" align="center">
-        <Heading size="6">Quản lý Sản phẩm</Heading>
-        <Button>
-          <PlusIcon /> Thêm sản phẩm
-        </Button>
-      </Flex>
-
-      <Card>
-        <Flex p="4" justify="between">
-          <TextField.Root
-            placeholder="Tìm kiếm sản phẩm..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ width: '300px' }}
-          >
-            <TextField.Slot>
-              <MagnifyingGlassIcon height="16" width="16" />
-            </TextField.Slot>
-          </TextField.Root>
-        </Flex>
-        <Table.Root variant="surface">
-          <Table.Header>
-            <Table.Row>
-              <Table.ColumnHeaderCell>Tên sản phẩm</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Danh mục</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Giá</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Tồn kho</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Trạng thái</Table.ColumnHeaderCell>
-              <Table.ColumnHeaderCell>Hành động</Table.ColumnHeaderCell>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {loading ? (
-              <Table.Row>
-                <Table.Cell colSpan={6} align="center">Đang tải...</Table.Cell>
-              </Table.Row>
-            ) : products.length === 0 ? (
-              <Table.Row>
-                <Table.Cell colSpan={6} align="center">Không có sản phẩm nào.</Table.Cell>
-              </Table.Row>
-            ) : (
-              products.map((product) => (
-                <Table.Row key={product.id}>
-                  <Table.Cell>{product.name}</Table.Cell>
-                  <Table.Cell>{product.category}</Table.Cell>
-                  <Table.Cell>{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}</Table.Cell>
-                  <Table.Cell>{product.stock}</Table.Cell>
-                  <Table.Cell>
-                    <Badge color={product.status === 'active' ? 'green' : product.status === 'draft' ? 'gray' : 'red'}>
-                      {product.status}
-                    </Badge>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Flex gap="2">
-                      <IconButton variant="soft" color="gray">
-                        <Pencil1Icon />
-                      </IconButton>
-                      <IconButton variant="soft" color="red" onClick={() => handleDelete(product.id)}>
-                        <TrashIcon />
-                      </IconButton>
-                    </Flex>
-                  </Table.Cell>
-                </Table.Row>
-              ))
-            )}
-          </Table.Body>
-        </Table.Root>
-        <Flex justify="center" align="center" gap="3" p="4">
-          <Button
-            variant="soft"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Trước
-          </Button>
-          <Text size="2">
-            Trang {page} / {totalPages}
-          </Text>
-          <Button
-            variant="soft"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Sau
-          </Button>
-        </Flex>
-      </Card>
-    </Flex>
-  );
-}
-</file>
-
-<file path="ecom-fe/app/(dashboard)/dashboard/page.tsx">
-// ecom-fe/app/(dashboard)/dashboard/page.tsx
-'use client';
-
-import { Flex, Grid, Card, Heading, Text, Box } from '@radix-ui/themes';
-import { CubeIcon, PersonIcon, BarChartIcon, ShoppingCartIcon } from '@radix-ui/react-icons';
-
-const stats = [
-  { title: 'Tổng doanh thu', value: '150,000,000₫', icon: <BarChartIcon width={24} height={24} />, color: 'var(--green-9)' },
-  { title: 'Đơn hàng', value: '1,234', icon: <ShoppingCartIcon width={24} height={24} />, color: 'var(--blue-9)' },
-  { title: 'Sản phẩm', value: '567', icon: <CubeIcon width={24} height={24} />, color: 'var(--orange-9)' },
-  { title: 'Người dùng', value: '8,910', icon: <PersonIcon width={24} height={24} />, color: 'var(--purple-9)' },
-];
-
-export default function DashboardPage() {
-  return (
-    <Flex direction="column" gap="6">
-      <Heading size="6">Tổng quan</Heading>
-      <Grid columns={{ initial: '1', sm: '2', lg: '4' }} gap="5">
-        {stats.map((stat) => (
-          <Card key={stat.title} size="3">
-            <Flex align="center" justify="between">
-              <Flex direction="column" gap="1">
-                <Text size="2" color="gray">{stat.title}</Text>
-                <Heading size="6">{stat.value}</Heading>
-              </Flex>
-              <Box style={{ color: stat.color }}>
-                {stat.icon}
-              </Box>
-            </Flex>
-          </Card>
-        ))}
-      </Grid>
-
-      {/* Placeholder for charts */}
-      <Card size="3" style={{ height: '400px' }}>
-        <Flex align="center" justify="center" style={{ height: '100%' }}>
-          <Text color="gray">Biểu đồ doanh thu (sắp ra mắt)</Text>
-        </Flex>
-      </Card>
-    </Flex>
-  );
-}
-</file>
-
-<file path="ecom-fe/app/(dashboard)/layout.tsx">
-// ecom-fe/app/(dashboard)/layout.tsx
-'use client';
-
-import { useState, useEffect } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
-import Link from 'next/link';
-import {
-  Box,
-  Flex,
-  Heading,
-  Text,
-  Button,
-  Avatar,
-  DropdownMenu,
-  Separator,
-} from '@radix-ui/themes';
-import {
-  HomeIcon,
-  CubeIcon,
-  PersonIcon,
-  ExitIcon,
-  HamburgerMenuIcon,
-} from '@radix-ui/react-icons';
-import { authService, User } from '@/lib/auth';
-
-const navItems = [
-  { href: '/dashboard', label: 'Tổng quan', icon: <HomeIcon /> },
-  { href: '/dashboard/products', label: 'Sản phẩm', icon: <CubeIcon /> },
-  { href: '/dashboard/users', label: 'Người dùng', icon: <PersonIcon /> },
-];
-
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-  useEffect(() => {
-    const checkAuth = async () => {
-      if (!authService.isAuthenticated()) {
-        router.push('/login');
-        return;
-      }
-      try {
-        const profile = await authService.getProfile();
-        if (profile.role !== 'admin') {
-          // Không phải admin, chuyển hướng về trang chủ
-          router.push('/');
-          return;
-        }
-        setUser(profile);
-      } catch (error) {
-        console.error('Failed to fetch profile', error);
-        authService.logout();
-        router.push('/login');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkAuth();
-  }, [router]);
-
-  const handleLogout = async () => {
-    await authService.logout();
-    router.push('/login');
-  };
-
-  if (loading) {
-    return (
-      <Flex align="center" justify="center" style={{ minHeight: '100vh' }}>
-        <Text>Đang tải...</Text>
-      </Flex>
-    );
-  }
-
-  if (!user) {
-    return null; // Sẽ được chuyển hướng bởi useEffect
-  }
-
-  return (
-    <Flex style={{ minHeight: '100vh' }}>
-      {/* Sidebar */}
-      <Box
-        style={{
-          width: isSidebarOpen ? '250px' : '60px',
-          backgroundColor: 'var(--gray-3)',
-          transition: 'width 0.3s ease',
-          padding: '16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-        }}
-      >
-        <Flex align="center" justify="between">
-          <Heading
-            size="5"
-            style={{
-              opacity: isSidebarOpen ? 1 : 0,
-              transition: 'opacity 0.2s',
-            }}
-          >
-            E-Commerce
-          </Heading>
-          <Button
-            variant="ghost"
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          >
-            <HamburgerMenuIcon />
-          </Button>
-        </Flex>
-        <Separator size="4" />
-        <Flex direction="column" gap="2">
-          {navItems.map((item) => (
-            <Link key={item.href} href={item.href} passHref>
-              <Button
-                variant={pathname === item.href ? 'solid' : 'ghost'}
-                style={{
-                  width: '100%',
-                  justifyContent: 'flex-start',
-                  padding: '10px',
-                }}
-              >
-                {item.icon}
-                {isSidebarOpen && <Text ml="2">{item.label}</Text>}
-              </Button>
-            </Link>
-          ))}
-        </Flex>
-      </Box>
-
-      {/* Main Content */}
-      <Flex direction="column" style={{ flex: 1 }}>
-        {/* Header */}
-        <Flex
-          align="center"
-          justify="between"
-          p="4"
-          style={{ borderBottom: '1px solid var(--gray-4)' }}
-        >
-          <Heading size="4">Dashboard</Heading>
-          <Flex align="center" gap="3">
-            <Text size="2">{user.firstName} {user.lastName}</Text>
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger>
-                <Button variant="soft">
-                  <Avatar
-                    size="2"
-                    src={user.avatar ?? undefined}
-                    fallback={user.firstName.charAt(0)}
-                    radius="full"
-                  />
-                </Button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content>
-                <DropdownMenu.Item onSelect={() => router.push('/profile')}>
-                  Hồ sơ
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator />
-                <DropdownMenu.Item color="red" onSelect={handleLogout}>
-                  <ExitIcon /> Đăng xuất
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Root>
-          </Flex>
-        </Flex>
-
-        {/* Page Content */}
-        <Box p="6" style={{ flex: 1, backgroundColor: 'var(--gray-1)' }}>
-          {children}
-        </Box>
-      </Flex>
-    </Flex>
-  );
-}
-</file>
-
 <file path="ecom-be/src/common/decorators/device-id.decorator.ts">
 // src/common/decorators/device-id.decorator.ts
 import {
@@ -657,64 +259,66 @@ export class TooManyRequestsException extends HttpException {
 }
 </file>
 
-<file path="ecom-be/src/common/guards/user-throttler.guard.ts">
-// src/common/guards/user-throttler.guard.ts
+<file path="ecom-be/src/common/guards/csrf.guard.ts">
+// src/common/guards/csrf.guard.ts
 import {
   Injectable,
+  CanActivate,
   ExecutionContext,
-  HttpException,
-  HttpStatus,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
-import { ThrottlerGuard, ThrottlerLimitDetail } from '@nestjs/throttler';
-import * as jwt from 'jsonwebtoken';
+import type { Request } from 'express';
 
 @Injectable()
-export class UserThrottlerGuard extends ThrottlerGuard {
-  protected readonly logger = new Logger(UserThrottlerGuard.name);
+export class CsrfGuard implements CanActivate {
+  private readonly logger = new Logger(CsrfGuard.name);
 
-  protected async getTracker(req: Record<string, any>): Promise<string> {
-    const authHeader = req.headers?.authorization;
+  // Các method an toàn → bỏ qua CSRF
+  private readonly SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
 
-    if (authHeader?.startsWith('Bearer ')) {
-      try {
-        const token = authHeader.slice(7);
-        const decoded = jwt.decode(token) as {
-          sub?: string;
-          role?: string;
-        } | null;
+  // Các route không cần CSRF (chưa login, chưa có cookie)
+  private readonly EXEMPT_PATHS = [
+    '/api/auth/login',
+    '/api/auth/register/send-otp',
+    '/api/auth/register/verify-otp',
+    '/api/auth/otp/resend',
+    '/api/auth/refresh',
+    '/api/auth/logout', // logout chỉ cần access token
+  ];
 
-        if (decoded?.role === 'admin' && decoded.sub) {
-          return `admin:${decoded.sub}`;
-        }
-        if (decoded?.sub) {
-          return `user:${decoded.sub}`;
-        }
-      } catch { }
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest<Request>();
+
+    // 1. Method an toàn → bỏ qua
+    if (this.SAFE_METHODS.includes(req.method)) {
+      return true;
     }
 
-    return `ip:${req.ip}`;
-  }
+    // 2. Route được exempt → bỏ qua
+    if (this.EXEMPT_PATHS.some((p) => req.path.startsWith(p))) {
+      return true;
+    }
 
-  protected async throwThrottlingException(
-    context: ExecutionContext,
-    throttlerLimitDetail: ThrottlerLimitDetail,
-  ): Promise<void> {
-    const req = context.switchToHttp().getRequest();
-    const ttlSeconds = Math.ceil(throttlerLimitDetail.timeToExpire / 1000);
+    // 3. Verify double-submit token
+    const cookieToken = req.cookies?.['csrfToken'];
+    const headerToken =
+      req.headers['x-csrf-token'] ?? req.headers['x-xsrf-token'];
 
-    this.logger.warn(
-      `🚫 Rate limit exceeded: ${req.method} ${req.url} (retry after ${ttlSeconds}s)`,
-    );
+    if (!cookieToken || !headerToken) {
+      this.logger.warn(
+        `CSRF token missing: ${req.method} ${req.url} ` +
+        `(cookie=${!!cookieToken}, header=${!!headerToken})`,
+      );
+      throw new ForbiddenException('CSRF token missing');
+    }
 
-    throw new HttpException(
-      {
-        statusCode: HttpStatus.TOO_MANY_REQUESTS,
-        message: `Quá nhiều yêu cầu. Vui lòng thử lại sau ${ttlSeconds} giây.`,
-        retryAfter: ttlSeconds,
-      },
-      HttpStatus.TOO_MANY_REQUESTS,
-    );
+    if (cookieToken !== headerToken) {
+      this.logger.warn(`CSRF token mismatch: ${req.method} ${req.url}`);
+      throw new ForbiddenException('CSRF token invalid');
+    }
+
+    return true;
   }
 }
 </file>
@@ -1083,21 +687,6 @@ export class RolesGuard implements CanActivate {
 
     return true;
   }
-}
-</file>
-
-<file path="ecom-be/src/modules/auth/interface/auth-response.interface.ts">
-import { User } from 'src/modules/user/user.entity';
-
-export interface AuthResponse {
-  user: Omit<User, 'password'>;
-  accessToken: string;
-}
-</file>
-
-<file path="ecom-be/src/modules/auth/interface/refresh-response.interface.ts">
-export interface RefreshResponse {
-  accessToken: string;
 }
 </file>
 
@@ -2192,299 +1781,6 @@ import { WebhookIpGuard } from './guards/webhook-ip.guard';
 export class PaymentModule { }
 </file>
 
-<file path="ecom-be/src/modules/payment/payment.service.ts">
-// src/modules/payment/payment.service.ts
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
-import { RedisService } from 'src/infrastructure/redis/redis.service';
-import { PaymentTransaction } from './entities/payment-transaction.entity';
-import {
-  PaymentProvider,
-  PaymentStatus,
-  WEBHOOK_IDEMPOTENCY_TTL,
-} from './constants/payment.constant';
-import { Cart, CartStatus, CartPaymentStatus } from '../cart/cart.entity';
-import { VnpayGateway } from './gateways/vnpay.gateway';
-import { MomoGateway } from './gateways/momo.gateway';
-import { CreatePaymentDto } from './dto/create-payment.dto';
-import type { PaymentGateway } from './interfaces/payment-gateway.interface';
-
-@Injectable()
-export class PaymentService {
-  private readonly logger = new Logger(PaymentService.name);
-  private readonly gateways: Map<PaymentProvider, PaymentGateway>;
-
-  constructor(
-    @InjectRepository(PaymentTransaction)
-    private readonly paymentRepo: Repository<PaymentTransaction>,
-    @InjectRepository(Cart)
-    private readonly cartRepo: Repository<Cart>,
-    private readonly vnpayGateway: VnpayGateway,
-    private readonly momoGateway: MomoGateway,
-    private readonly redis: RedisService,
-    private readonly config: ConfigService,
-    private readonly dataSource: DataSource,
-  ) {
-    this.gateways = new Map<PaymentProvider, PaymentGateway>([
-      [PaymentProvider.VNPAY, this.vnpayGateway],
-      [PaymentProvider.MOMO, this.momoGateway],
-    ]);
-  }
-
-  // ============================================================
-  // CREATE PAYMENT
-  // ============================================================
-  async createPayment(
-    userId: string,
-    dto: CreatePaymentDto,
-    ipAddress: string,
-  ): Promise<{ paymentUrl: string; transactionId: string }> {
-    // 1. Verify cart (đã CHECKED_OUT)
-    const cart = await this.cartRepo.findOne({
-      where: {
-        id: dto.cartId,
-        userId,
-        status: CartStatus.CHECKED_OUT,
-      },
-    });
-    if (!cart) {
-      throw new NotFoundException('Cart not found or not checked out');
-    }
-    if (cart.paymentStatus === CartPaymentStatus.PAID) {
-      throw new ConflictException('Order already paid');
-    }
-
-    // 2. Check existing pending transaction
-    const existing = await this.paymentRepo.findOne({
-      where: { cartId: dto.cartId, status: PaymentStatus.PENDING },
-    });
-    if (existing?.paymentUrl) {
-      return {
-        paymentUrl: existing.paymentUrl,
-        transactionId: existing.id,
-      };
-    }
-
-    // 3. Get gateway
-    const gateway = this.gateways.get(dto.provider);
-    if (!gateway) {
-      throw new BadRequestException(`Unsupported provider: ${dto.provider}`);
-    }
-
-    // 4. Create transaction record
-    const transaction = this.paymentRepo.create({
-      cartId: cart.id,
-      userId,
-      provider: dto.provider,
-      amount: Number(cart.totalAmount),
-      status: PaymentStatus.PENDING,
-    });
-    await this.paymentRepo.save(transaction);
-
-    // 5. Call gateway
-    try {
-      const returnUrl = `${this.config.get('APP_URL')}/api/payments/${dto.provider}/return`;
-      const result = await gateway.createPayment({
-        orderId: cart.id, // dùng cartId làm orderId cho gateway
-        amount: Number(cart.totalAmount),
-        orderInfo: `Thanh toan don hang ${cart.id.slice(0, 8)}`,
-        ipAddress,
-        returnUrl,
-      });
-
-      transaction.paymentUrl = result.paymentUrl;
-      transaction.providerTransactionId = result.providerTransactionId;
-      transaction.status = PaymentStatus.PROCESSING;
-      await this.paymentRepo.save(transaction);
-
-      this.logger.log(
-        `Payment created: cart=${cart.id} provider=${dto.provider} tx=${transaction.id}`,
-      );
-
-      return {
-        paymentUrl: result.paymentUrl,
-        transactionId: transaction.id,
-      };
-    } catch (error) {
-      transaction.status = PaymentStatus.FAILED;
-      transaction.errorMessage = (error as Error).message;
-      await this.paymentRepo.save(transaction);
-      throw error;
-    }
-  }
-
-  // ============================================================
-  // WEBHOOK HANDLER
-  // ============================================================
-  async handleWebhook(
-    provider: PaymentProvider,
-    data: Record<string, any>,
-    ipAddress: string,
-  ): Promise<any> {
-    const gateway = this.gateways.get(provider);
-    if (!gateway) {
-      throw new BadRequestException(`Unsupported provider: ${provider}`);
-    }
-
-    // 1. VERIFY SIGNATURE
-    const verifyResult = gateway.verifyWebhook(data);
-    if (!verifyResult.isValid) {
-      this.logger.warn(
-        `⚠️ Invalid ${provider} signature from IP ${ipAddress}`,
-        { orderId: verifyResult.orderId },
-      );
-      return gateway.buildWebhookResponse(false, 'Invalid signature');
-    }
-
-    // 2. IDEMPOTENCY — SET NX atomic (chỉ 1 lần)
-    const idempotencyKey = `webhook:${provider}:${verifyResult.providerTransactionId}`;
-    const acquired = await this.redis.setNX(
-      idempotencyKey,
-      'processing',
-      WEBHOOK_IDEMPOTENCY_TTL,
-    );
-
-    if (!acquired) {
-      const status = await this.redis.get(idempotencyKey);
-      if (status === 'done') {
-        this.logger.log(
-          `Webhook already processed: ${provider} tx=${verifyResult.providerTransactionId}`,
-        );
-        return gateway.buildWebhookResponse(true, 'Already processed');
-      }
-      // Đang xử lý bởi request khác
-      return gateway.buildWebhookResponse(true, 'Processing');
-    }
-
-    // 3. FIND TRANSACTION
-    const transaction = await this.paymentRepo.findOne({
-      where: { cartId: verifyResult.orderId, provider },
-      order: { createdAt: 'DESC' },
-    });
-
-    if (!transaction) {
-      this.logger.error(
-        `Transaction not found: cart=${verifyResult.orderId} provider=${provider}`,
-      );
-      await this.redis.del(idempotencyKey); // release để retry
-      return gateway.buildWebhookResponse(false, 'Transaction not found');
-    }
-
-    // 4. VERIFY AMOUNT
-    if (Number(transaction.amount) !== verifyResult.amount) {
-      this.logger.error(
-        `Amount mismatch: expected=${transaction.amount} got=${verifyResult.amount}`,
-      );
-      await this.redis.del(idempotencyKey);
-      return gateway.buildWebhookResponse(false, 'Invalid amount');
-    }
-
-    // 5. ATOMIC UPDATE — state machine
-    const newStatus = verifyResult.isSuccess
-      ? PaymentStatus.SUCCESS
-      : PaymentStatus.FAILED;
-
-    try {
-      const result = await this.dataSource.transaction(async (manager) => {
-        const updateResult = await manager
-          .createQueryBuilder()
-          .update(PaymentTransaction)
-          .set({
-            status: newStatus,
-            providerTransactionId: verifyResult.providerTransactionId,
-            providerResponse: verifyResult.rawData,
-            paidAt: verifyResult.isSuccess ? new Date() : null,
-            errorMessage: verifyResult.isSuccess ? null : verifyResult.message,
-          })
-          .where('id = :id', { id: transaction.id })
-          .andWhere('status IN (:...statuses)', {
-            statuses: [PaymentStatus.PENDING, PaymentStatus.PROCESSING],
-          })
-          .execute();
-
-        if (updateResult.affected === 0) {
-          return { alreadyProcessed: true };
-        }
-
-        // Update Cart thay Order
-        if (verifyResult.isSuccess) {
-          await manager
-            .createQueryBuilder()
-            .update(Cart)
-            .set({
-              paymentStatus: CartPaymentStatus.PAID,
-              paidAt: new Date(),
-            })
-            .where('id = :id', { id: transaction.cartId })
-            .andWhere('payment_status = :status', {
-              status: CartPaymentStatus.UNPAID,
-            })
-            .execute();
-        }
-
-        return { alreadyProcessed: false };
-      });
-
-      if (result.alreadyProcessed) {
-        await this.redis.set(idempotencyKey, 'done', WEBHOOK_IDEMPOTENCY_TTL);
-        return gateway.buildWebhookResponse(true, 'Already processed');
-      }
-
-      // 6. Mark idempotency done
-      await this.redis.set(idempotencyKey, 'done', WEBHOOK_IDEMPOTENCY_TTL);
-
-      // 7. LOG
-      this.logger.log(
-        `✅ Webhook processed: ${provider} cart=${transaction.cartId} status=${newStatus}`,
-        {
-          transactionId: transaction.id,
-          providerTxId: verifyResult.providerTransactionId,
-          amount: verifyResult.amount,
-          ip: ipAddress,
-        },
-      );
-
-      // 8. RETURN
-      return gateway.buildWebhookResponse(true, 'Confirm Success');
-    } catch (error) {
-      // Release lock để gateway retry
-      await this.redis.del(idempotencyKey);
-      this.logger.error(
-        `❌ Webhook processing failed: ${provider} cart=${transaction.cartId}`,
-        error,
-      );
-      throw error;
-    }
-  }
-
-  // ============================================================
-  // QUERY
-  // ============================================================
-  async getTransaction(userId: string, transactionId: string) {
-    const tx = await this.paymentRepo.findOne({
-      where: { id: transactionId, userId },
-    });
-    if (!tx) throw new NotFoundException('Transaction not found');
-    return tx;
-  }
-
-  async getTransactionsByCart(userId: string, cartId: string) {
-    return this.paymentRepo.find({
-      where: { cartId, userId },
-      order: { createdAt: 'DESC' },
-    });
-  }
-}
-</file>
-
 <file path="ecom-be/src/modules/product/dto/create-product.dto.ts">
 // src/modules/product/dto/create-product.dto.ts
 import {
@@ -3483,122 +2779,404 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 }
 </file>
 
-<file path="ecom-fe/app/(auth)/verify-otp/page.tsx">
-'use client'
-import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Box, Card, Flex, Heading, Text, TextField, Button, Callout } from '@radix-ui/themes';
-import { authService } from '@/lib/auth';
+<file path="ecom-fe/app/(dashboard)/dashboard/products/page.tsx">
+// ecom-fe/app/(dashboard)/dashboard/products/page.tsx
+'use client';
 
-function VerifyOtpContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const purpose = searchParams.get('purpose') || 'register';
+import { useState, useEffect } from 'react';
+import {
+  Heading,
+  Table,
+  Button,
+  Flex,
+  Box,
+  Text,
+  Badge,
+  TextField,
+  IconButton,
+} from '@radix-ui/themes';
+import { PlusIcon, MagnifyingGlassIcon, Pencil1Icon, TrashIcon } from '@radix-ui/react-icons';
+import { api } from '@/lib/api';
 
-  const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [cooldown, setCooldown] = useState(0);
+// Định nghĩa kiểu dữ liệu cho Product (dựa trên backend)
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  stock: number;
+  status: 'draft' | 'active' | 'inactive' | 'out_of_stock';
+  category: string;
+  createdAt: string;
+}
 
-  useEffect(() => {
-    const pending = sessionStorage.getItem('pendingEmail');
-    if (pending) setEmail(pending);
-  }, []);
+interface PaginatedProducts {
+  data: Product[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
 
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const t = setTimeout(() => setCooldown(cooldown - 1), 1000);
-    return () => clearTimeout(t);
-  }, [cooldown]);
+export default function ProductsPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
-  const handleVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const fetchProducts = async () => {
     setLoading(true);
-    setError('');
-
     try {
-      if (purpose === 'register') {
-        const { user, tokens } = await authService.verifyRegisterOtp(email, otp);
-        authService.saveTokens(tokens);
-        sessionStorage.removeItem('pendingEmail');
-        router.push(user.role === 'admin' ? '/admin' : '/');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Xác thực thất bại');
+      const { data } = await api.get<PaginatedProducts>('/products', {
+        params: { search, page, limit: 10 },
+      });
+      setProducts(data.data);
+      setTotalPages(data.meta.totalPages);
+    } catch (error) {
+      console.error('Failed to fetch products', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResend = async () => {
+  useEffect(() => {
+    fetchProducts();
+  }, [search, page]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Bạn có chắc chắn muốn xóa sản phẩm này?')) return;
     try {
-      await authService.resendOtp(email, purpose);
-      setCooldown(60);
-      setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Không thể gửi lại OTP');
+      await api.delete(`/products/${id}`);
+      fetchProducts(); // Tải lại danh sách
+    } catch (error) {
+      console.error('Failed to delete product', error);
+      alert('Xóa sản phẩm thất bại.');
     }
   };
 
   return (
-    <Flex align="center" justify="center" style={{ minHeight: '100vh', backgroundColor: 'var(--gray-2)' }}>
-      <Box width="100%" maxWidth="400px" p="4">
-        <Card size="4">
-          <Flex direction="column" gap="4">
-            <Heading size="6" align="center">Xác thực OTP</Heading>
-            <Text size="2" color="gray" align="center">
-              Mã OTP đã được gửi đến <strong>{email}</strong>
-            </Text>
+    <Flex direction="column" gap="5">
+      <Flex justify="between" align="center">
+        <Heading size="6">Quản lý Sản phẩm</Heading>
+        <Button>
+          <PlusIcon /> Thêm sản phẩm
+        </Button>
+      </Flex>
 
-            {error && (
-              <Callout.Root color="red" size="1">
-                <Callout.Text>{error}</Callout.Text>
-              </Callout.Root>
+      <Card>
+        <Flex p="4" justify="between">
+          <TextField.Root
+            placeholder="Tìm kiếm sản phẩm..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: '300px' }}
+          >
+            <TextField.Slot>
+              <MagnifyingGlassIcon height="16" width="16" />
+            </TextField.Slot>
+          </TextField.Root>
+        </Flex>
+        <Table.Root variant="surface">
+          <Table.Header>
+            <Table.Row>
+              <Table.ColumnHeaderCell>Tên sản phẩm</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Danh mục</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Giá</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Tồn kho</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Trạng thái</Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell>Hành động</Table.ColumnHeaderCell>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {loading ? (
+              <Table.Row>
+                <Table.Cell colSpan={6} align="center">Đang tải...</Table.Cell>
+              </Table.Row>
+            ) : products.length === 0 ? (
+              <Table.Row>
+                <Table.Cell colSpan={6} align="center">Không có sản phẩm nào.</Table.Cell>
+              </Table.Row>
+            ) : (
+              products.map((product) => (
+                <Table.Row key={product.id}>
+                  <Table.Cell>{product.name}</Table.Cell>
+                  <Table.Cell>{product.category}</Table.Cell>
+                  <Table.Cell>{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(product.price)}</Table.Cell>
+                  <Table.Cell>{product.stock}</Table.Cell>
+                  <Table.Cell>
+                    <Badge color={product.status === 'active' ? 'green' : product.status === 'draft' ? 'gray' : 'red'}>
+                      {product.status}
+                    </Badge>
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Flex gap="2">
+                      <IconButton variant="soft" color="gray">
+                        <Pencil1Icon />
+                      </IconButton>
+                      <IconButton variant="soft" color="red" onClick={() => handleDelete(product.id)}>
+                        <TrashIcon />
+                      </IconButton>
+                    </Flex>
+                  </Table.Cell>
+                </Table.Row>
+              ))
             )}
-
-            <form onSubmit={handleVerify}>
-              <Flex direction="column" gap="4">
-                <TextField.Root
-                  placeholder="Nhập mã OTP 6 chữ số"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  size="3"
-                  style={{ textAlign: 'center', fontSize: '24px', letterSpacing: '8px' }}
-                  required
-                />
-
-                <Button
-                  size="3"
-                  type="submit"
-                  disabled={loading || otp.length < 4}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {loading ? 'Đang xác thực...' : 'Xác thực'}
-                </Button>
-              </Flex>
-            </form>
-
-            <Button
-              variant="ghost"
-              onClick={handleResend}
-              disabled={cooldown > 0}
-              style={{ cursor: cooldown > 0 ? 'not-allowed' : 'pointer' }}
-            >
-              {cooldown > 0 ? `Gửi lại sau ${cooldown}s` : 'Gửi lại mã OTP'}
-            </Button>
-          </Flex>
-        </Card>
-      </Box>
+          </Table.Body>
+        </Table.Root>
+        <Flex justify="center" align="center" gap="3" p="4">
+          <Button
+            variant="soft"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            Trước
+          </Button>
+          <Text size="2">
+            Trang {page} / {totalPages}
+          </Text>
+          <Button
+            variant="soft"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Sau
+          </Button>
+        </Flex>
+      </Card>
     </Flex>
   );
 }
+</file>
 
-export default function VerifyOtpPage() {
+<file path="ecom-fe/app/(dashboard)/dashboard/page.tsx">
+// ecom-fe/app/(dashboard)/dashboard/page.tsx
+'use client';
+
+import { Flex, Grid, Card, Heading, Text, Box } from '@radix-ui/themes';
+import { CubeIcon, PersonIcon, BarChartIcon } from '@radix-ui/react-icons';
+
+const stats = [
+  { title: 'Tổng doanh thu', value: '150,000,000₫', icon: <BarChartIcon width={24} height={24} />, color: 'var(--green-9)' },
+  { title: 'Đơn hàng', value: '1,234', icon: <BarChartIcon width={24} height={24} />, color: 'var(--blue-9)' },
+  { title: 'Sản phẩm', value: '567', icon: <CubeIcon width={24} height={24} />, color: 'var(--orange-9)' },
+  { title: 'Người dùng', value: '8,910', icon: <PersonIcon width={24} height={24} />, color: 'var(--purple-9)' },
+];
+
+export default function DashboardPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <VerifyOtpContent />
-    </Suspense>
+    <Flex direction="column" gap="6">
+      <Heading size="6">Tổng quan</Heading>
+      <Grid columns={{ initial: '1', sm: '2', lg: '4' }} gap="5">
+        {stats.map((stat) => (
+          <Card key={stat.title} size="3">
+            <Flex align="center" justify="between">
+              <Flex direction="column" gap="1">
+                <Text size="2" color="gray">{stat.title}</Text>
+                <Heading size="6">{stat.value}</Heading>
+              </Flex>
+              <Box style={{ color: stat.color }}>
+                {stat.icon}
+              </Box>
+            </Flex>
+          </Card>
+        ))}
+      </Grid>
+
+      {/* Placeholder for charts */}
+      <Card size="3" style={{ height: '400px' }}>
+        <Flex align="center" justify="center" style={{ height: '100%' }}>
+          <Text color="gray">Biểu đồ doanh thu (sắp ra mắt)</Text>
+        </Flex>
+      </Card>
+    </Flex>
+  );
+}
+</file>
+
+<file path="ecom-fe/app/(dashboard)/layout.tsx">
+// ecom-fe/app/(dashboard)/layout.tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
+import {
+  Box,
+  Flex,
+  Heading,
+  Text,
+  Button,
+  Avatar,
+  DropdownMenu,
+  Separator,
+} from '@radix-ui/themes';
+import {
+  HomeIcon,
+  CubeIcon,
+  PersonIcon,
+  ExitIcon,
+  HamburgerMenuIcon,
+} from '@radix-ui/react-icons';
+import { authService, User } from '@/lib/auth';
+
+const navItems = [
+  { href: '/dashboard', label: 'Tổng quan', icon: <HomeIcon /> },
+  { href: '/dashboard/products', label: 'Sản phẩm', icon: <CubeIcon /> },
+  { href: '/dashboard/users', label: 'Người dùng', icon: <PersonIcon /> },
+];
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const profile = await authService.getProfile();
+        if (profile.role !== 'admin') {
+          router.push('/');
+          return;
+        }
+        setUser(profile);
+      } catch (error) {
+        // 401 → interceptor đã thử refresh, vẫn fail → chuyển login
+        router.push('/login');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const handleLogout = async () => {
+      try {
+        await authService.logout();
+      } catch {
+        // dù lỗi vẫn chuyển về login
+      }
+      router.push('/login');
+    };
+
+    checkAuth();
+  }, [router]);
+
+  const handleLogout = async () => {
+    await authService.logout();
+    router.push('/login');
+  };
+
+  if (loading) {
+    return (
+      <Flex align="center" justify="center" style={{ minHeight: '100vh' }}>
+        <Text>Đang tải...</Text>
+      </Flex>
+    );
+  }
+
+  if (!user) {
+    return null; // Sẽ được chuyển hướng bởi useEffect
+  }
+
+  return (
+    <Flex style={{ minHeight: '100vh' }}>
+      {/* Sidebar */}
+      <Box
+        style={{
+          width: isSidebarOpen ? '250px' : '60px',
+          backgroundColor: 'var(--gray-3)',
+          transition: 'width 0.3s ease',
+          padding: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+        }}
+      >
+        <Flex align="center" justify="between">
+          <Heading
+            size="5"
+            style={{
+              opacity: isSidebarOpen ? 1 : 0,
+              transition: 'opacity 0.2s',
+            }}
+          >
+            E-Commerce
+          </Heading>
+          <Button
+            variant="ghost"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          >
+            <HamburgerMenuIcon />
+          </Button>
+        </Flex>
+        <Separator size="4" />
+        <Flex direction="column" gap="2">
+          {navItems.map((item) => (
+            <Link key={item.href} href={item.href} passHref>
+              <Button
+                variant={pathname === item.href ? 'solid' : 'ghost'}
+                style={{
+                  width: '100%',
+                  justifyContent: 'flex-start',
+                  padding: '10px',
+                }}
+              >
+                {item.icon}
+                {isSidebarOpen && <Text ml="2">{item.label}</Text>}
+              </Button>
+            </Link>
+          ))}
+        </Flex>
+      </Box>
+
+      {/* Main Content */}
+      <Flex direction="column" style={{ flex: 1 }}>
+        {/* Header */}
+        <Flex
+          align="center"
+          justify="between"
+          p="4"
+          style={{ borderBottom: '1px solid var(--gray-4)' }}
+        >
+          <Heading size="4">Dashboard</Heading>
+          <Flex align="center" gap="3">
+            <Text size="2">{user.firstName} {user.lastName}</Text>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>
+                <Button variant="soft">
+                  <Avatar
+                    size="2"
+                    src={user.avatar ?? undefined}
+                    fallback={user.firstName.charAt(0)}
+                    radius="full"
+                  />
+                </Button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content>
+                <DropdownMenu.Item onSelect={() => router.push('/profile')}>
+                  Hồ sơ
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item color="red" onSelect={handleLogout}>
+                  <ExitIcon /> Đăng xuất
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          </Flex>
+        </Flex>
+
+        {/* Page Content */}
+        <Box p="6" style={{ flex: 1, backgroundColor: 'var(--gray-1)' }}>
+          {children}
+        </Box>
+      </Flex>
+    </Flex>
   );
 }
 </file>
@@ -3629,32 +3207,6 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
-}
-</file>
-
-<file path="ecom-fe/app/layout.tsx">
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import '@radix-ui/themes/styles.css';
-import { Theme } from '@radix-ui/themes';
-import "./globals.css";
-
-
-export const metadata: Metadata = {
-  title: "Create Next App",
-  description: "Generated by create next app",
-};
-
-export default function RootLayout({ children }: LayoutProps<"/">) {
-  return (
-    <html lang="vi">
-      <body>
-        <Theme accentColor="teal" radius="full">
-          {children}
-        </Theme>
-      </body>
-    </html>
-  );
 }
 </file>
 
@@ -3773,170 +3325,6 @@ export function useAuth(requireAuth = false) {
 }
 </file>
 
-<file path="ecom-fe/lib/api.ts">
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-
-export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL, // http://localhost:8080/api
-  headers: { 'Content-Type': 'application/json' },
-  withCredentials: true,
-});
-
-// Request interceptor: gắn accessToken
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
-  return config;
-});
-
-// Response interceptor: tự động refresh khi 401
-let isRefreshing = false;
-let queue: Array<(token: string) => void> = [];
-
-api.interceptors.response.use(
-  (res) => res,
-  async (error: AxiosError) => {
-    const original = error.config as InternalAxiosRequestConfig & {
-      _retry?: boolean;
-    };
-
-    if (error.response?.status === 401 && !original._retry) {
-      original._retry = true;
-      const refreshToken = localStorage.getItem('refreshToken');
-
-      if (!refreshToken) {
-        window.location.href = '/login';
-        return Promise.reject(error);
-      }
-
-      if (isRefreshing) {
-        return new Promise((resolve) => {
-          queue.push((token) => {
-            original.headers.Authorization = `Bearer ${token}`;
-            resolve(api(original));
-          });
-        });
-      }
-
-      isRefreshing = true;
-      try {
-        const { data } = await axios.post(
-          `${process.env.NEXT_PUBLIC_API_URL}/auth/refresh`,
-          { refreshToken },
-        );
-        localStorage.setItem('accessToken', data.accessToken);
-        localStorage.setItem('refreshToken', data.refreshToken);
-
-        queue.forEach((cb) => cb(data.accessToken));
-        queue = [];
-
-        original.headers.Authorization = `Bearer ${data.accessToken}`;
-        return api(original);
-      } catch (err) {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        window.location.href = '/login';
-        return Promise.reject(err);
-      } finally {
-        isRefreshing = false;
-      }
-    }
-
-    return Promise.reject(error);
-  },
-);
-</file>
-
-<file path="ecom-fe/lib/auth.ts">
-// lib/auth.ts
-import { api } from './api';
-
-export interface RegisterPayload {
-  firstName: string;
-  lastName: string;
-  email: string;
-  username: string;
-  password: string;
-  phone?: string;
-}
-
-export interface LoginPayload {
-  email: string;
-  password: string;
-}
-
-export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
-}
-
-export interface User {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  username: string;
-  role: 'user' | 'admin';
-  avatar?: string | null;
-}
-
-export const authService = {
-  register: async (payload: RegisterPayload) => {
-    const { data } = await api.post<{ message: string }>(
-      '/auth/register/send-otp',
-      payload,
-    );
-    return data;
-  },
-
-  verifyRegisterOtp: async (email: string, otp: string) => {
-    const { data } = await api.post<{ user: User }>(
-      '/auth/register/verify-otp',
-      { email, otp, purpose: 'register' },
-    );
-    return data;
-  },
-
-  resendOtp: async (email: string, purpose: string) => {
-    const { data } = await api.post<{ message: string }>('/auth/otp/resend', {
-      email,
-      purpose,
-    });
-    return data;
-  },
-
-  login: async (payload: LoginPayload) => {
-    const { data } = await api.post<{ user: User }>('/auth/login', payload);
-    return data;
-  },
-
-
-  logout: async () => {
-    await api.post('/auth/logout');
-  },
-
-  getProfile: async () => {
-    const { data } = await api.get<User>('/auth/profile');
-    return data;
-  },
-
-  saveTokens: (tokens: AuthTokens) => {
-    localStorage.setItem('accessToken', tokens.accessToken);
-    localStorage.setItem('refreshToken', tokens.refreshToken);
-  },
-
-  getAccessToken: () =>
-    typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null,
-
-  isAuthenticated: () =>
-    typeof window !== 'undefined' && !!localStorage.getItem('accessToken'),
-};
-</file>
-
 <file path="ecom-fe/public/file.svg">
 <svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
 </file>
@@ -4011,66 +3399,6 @@ const eslintConfig = defineConfig([
 ]);
 
 export default eslintConfig;
-</file>
-
-<file path="ecom-fe/middleware.ts">
-// ecom-fe/middleware.ts
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-
-// Route cần đăng nhập
-const PROTECTED_ROUTES = ['/profile', '/orders', '/cart', '/checkout', '/dashboard'];
-
-// Route chỉ admin
-const ADMIN_ROUTES = ['/dashboard'];
-
-// Route auth (nếu đã login thì không cho vào)
-const AUTH_ROUTES = ['/login', '/register', '/verify-otp'];
-
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  // Lưu ý: accessToken được lưu trong localStorage, không phải cookie.
-  // Middleware không thể đọc localStorage.
-  // => Giải pháp tạm thời: Dùng cookie để lưu accessToken (không khuyến khích vì bảo mật)
-  // hoặc chấp nhận việc middleware không bảo vệ được và dựa vào client-side check trong layout.
-  // Trong ví dụ này, tôi sẽ giả định accessToken được lưu trong cookie để middleware hoạt động.
-  const accessToken = request.cookies.get('accessToken')?.value;
-  const isAuthenticated = !!accessToken;
-
-  // 1. Đã login mà vào /login, /register → chuyển về trang chủ
-  if (AUTH_ROUTES.some((route) => pathname.startsWith(route)) && isAuthenticated) {
-    return NextResponse.redirect(new URL('/', request.url));
-  }
-
-  // 2. Chưa login mà vào route protected → chuyển về /login (kèm redirect)
-  if (
-    PROTECTED_ROUTES.some((route) => pathname.startsWith(route)) &&
-    !isAuthenticated
-  ) {
-    const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // 3. Vào /dashboard mà không phải admin → chặn (cần role)
-  // Middleware không decode JWT dễ dàng nếu dùng secret khác.
-  // → Nên check role ở server component hoặc API riêng.
-  // Trong layout của dashboard, chúng ta đã check role.
-
-  return NextResponse.next();
-}
-
-export const config = {
-  matcher: [
-    /*
-     * Match tất cả request trừ:
-     * - _next/static, _next/image (static files)
-     * - favicon.ico
-     * - public files (svg, png, jpg...)
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
-  ],
-};
 </file>
 
 <file path="ecom-fe/next.config.ts">
@@ -4315,6 +3643,94 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .vercel/
 </file>
 
+<file path="ecom-be/src/common/guards/user-throttler.guard.ts">
+// src/common/guards/user-throttler.guard.ts
+import {
+  Injectable,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { ThrottlerGuard, ThrottlerLimitDetail } from '@nestjs/throttler';
+import * as jwt from 'jsonwebtoken';
+import type { Request } from 'express';
+
+@Injectable()
+export class UserThrottlerGuard extends ThrottlerGuard {
+  protected readonly logger = new Logger(UserThrottlerGuard.name);
+
+  protected async getTracker(req: Record<string, any>): Promise<string> {
+    // 1. Thử đọc từ cookie trước
+    const request = req as Request;
+    const cookieToken = request.cookies?.['accessToken'];
+
+    // 2. Fallback: header Authorization (mobile, swagger)
+    const authHeader = req.headers?.authorization;
+    const bearerToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+
+    const token = cookieToken ?? bearerToken;
+
+    if (token) {
+      try {
+        const decoded = jwt.decode(token) as {
+          sub?: string;
+          role?: string;
+        } | null;
+
+        if (decoded?.role === 'admin' && decoded.sub) {
+          return `admin:${decoded.sub}`;
+        }
+        if (decoded?.sub) {
+          return `user:${decoded.sub}`;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return `ip:${req.ip}`;
+  }
+
+  protected async throwThrottlingException(
+    context: ExecutionContext,
+    throttlerLimitDetail: ThrottlerLimitDetail,
+  ): Promise<void> {
+    const req = context.switchToHttp().getRequest();
+    const ttlSeconds = Math.ceil(throttlerLimitDetail.timeToExpire / 1000);
+
+    this.logger.warn(
+      `🚫 Rate limit exceeded: ${req.method} ${req.url} (retry after ${ttlSeconds}s)`,
+    );
+
+    throw new HttpException(
+      {
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        message: `Quá nhiều yêu cầu. Vui lòng thử lại sau ${ttlSeconds} giây.`,
+        retryAfter: ttlSeconds,
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
+  }
+}
+</file>
+
+<file path="ecom-be/src/modules/auth/interface/auth-response.interface.ts">
+import { User } from 'src/modules/user/user.entity';
+
+export interface AuthResponse {
+  user: Omit<User, 'password'>;
+}
+</file>
+
+<file path="ecom-be/src/modules/auth/interface/refresh-response.interface.ts">
+export interface RefreshResponse {
+  message: string;
+}
+</file>
+
 <file path="ecom-be/src/modules/auth/services/otp.service.ts">
 // src/modules/auth/services/otp.service.ts
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
@@ -4436,38 +3852,6 @@ export class OtpService {
     // Thành công → xóa OTP & attempts
     await this.redis.del(otpKey, attemptsKey);
     return true;
-  }
-}
-</file>
-
-<file path="ecom-be/src/modules/auth/strategies/jwt.strategy.ts">
-// src/auth/strategies/jwt.strategy.ts
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ConfigService } from '@nestjs/config';
-import { UserService } from '../../user/user.service';
-import { TokenPayload } from '../interface/token-payload.interface';
-
-@Injectable()
-export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly userService: UserService,
-  ) {
-    super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_ACCESS_SECRET'),
-    });
-  }
-
-  async validate(payload: TokenPayload) {
-    const user = await this.userService.findOne(payload.sub);
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-    return user;
   }
 }
 </file>
@@ -5041,6 +4425,299 @@ export class CartService {
 }
 </file>
 
+<file path="ecom-be/src/modules/payment/payment.service.ts">
+// src/modules/payment/payment.service.ts
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import { RedisService } from 'src/infrastructure/redis/redis.service';
+import { PaymentTransaction } from './entities/payment-transaction.entity';
+import {
+  PaymentProvider,
+  PaymentStatus,
+  WEBHOOK_IDEMPOTENCY_TTL,
+} from './constants/payment.constant';
+import { Cart, CartStatus, CartPaymentStatus } from '../cart/cart.entity';
+import { VnpayGateway } from './gateways/vnpay.gateway';
+import { MomoGateway } from './gateways/momo.gateway';
+import { CreatePaymentDto } from './dto/create-payment.dto';
+import type { PaymentGateway } from './interfaces/payment-gateway.interface';
+
+@Injectable()
+export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+  private readonly gateways: Map<PaymentProvider, PaymentGateway>;
+
+  constructor(
+    @InjectRepository(PaymentTransaction)
+    private readonly paymentRepo: Repository<PaymentTransaction>,
+    @InjectRepository(Cart)
+    private readonly cartRepo: Repository<Cart>,
+    private readonly vnpayGateway: VnpayGateway,
+    private readonly momoGateway: MomoGateway,
+    private readonly redis: RedisService,
+    private readonly config: ConfigService,
+    private readonly dataSource: DataSource,
+  ) {
+    this.gateways = new Map<PaymentProvider, PaymentGateway>([
+      [PaymentProvider.VNPAY, this.vnpayGateway],
+      [PaymentProvider.MOMO, this.momoGateway],
+    ]);
+  }
+
+  // ============================================================
+  // CREATE PAYMENT
+  // ============================================================
+  async createPayment(
+    userId: string,
+    dto: CreatePaymentDto,
+    ipAddress: string,
+  ): Promise<{ paymentUrl: string; transactionId: string }> {
+    // 1. Verify cart (đã CHECKED_OUT)
+    const cart = await this.cartRepo.findOne({
+      where: {
+        id: dto.cartId,
+        userId,
+        status: CartStatus.CHECKED_OUT,
+      },
+    });
+    if (!cart) {
+      throw new NotFoundException('Cart not found or not checked out');
+    }
+    if (cart.paymentStatus === CartPaymentStatus.PAID) {
+      throw new ConflictException('Order already paid');
+    }
+
+    // 2. Check existing pending transaction
+    const existing = await this.paymentRepo.findOne({
+      where: { cartId: dto.cartId, status: PaymentStatus.PENDING },
+    });
+    if (existing?.paymentUrl) {
+      return {
+        paymentUrl: existing.paymentUrl,
+        transactionId: existing.id,
+      };
+    }
+
+    // 3. Get gateway
+    const gateway = this.gateways.get(dto.provider);
+    if (!gateway) {
+      throw new BadRequestException(`Unsupported provider: ${dto.provider}`);
+    }
+
+    // 4. Create transaction record
+    const transaction = this.paymentRepo.create({
+      cartId: cart.id,
+      userId,
+      provider: dto.provider,
+      amount: Number(cart.totalAmount),
+      status: PaymentStatus.PENDING,
+    });
+    await this.paymentRepo.save(transaction);
+
+    // 5. Call gateway
+    try {
+      const returnUrl = `${this.config.get('APP_URL')}/api/payments/${dto.provider}/return`;
+      const result = await gateway.createPayment({
+        orderId: cart.id, // dùng cartId làm orderId cho gateway
+        amount: Number(cart.totalAmount),
+        orderInfo: `Thanh toan don hang ${cart.id.slice(0, 8)}`,
+        ipAddress,
+        returnUrl,
+      });
+
+      transaction.paymentUrl = result.paymentUrl;
+      transaction.providerTransactionId = result.providerTransactionId;
+      transaction.status = PaymentStatus.PROCESSING;
+      await this.paymentRepo.save(transaction);
+
+      this.logger.log(
+        `Payment created: cart=${cart.id} provider=${dto.provider} tx=${transaction.id}`,
+      );
+
+      return {
+        paymentUrl: result.paymentUrl,
+        transactionId: transaction.id,
+      };
+    } catch (error) {
+      transaction.status = PaymentStatus.FAILED;
+      transaction.errorMessage = (error as Error).message;
+      await this.paymentRepo.save(transaction);
+      throw error;
+    }
+  }
+
+  // ============================================================
+  // WEBHOOK HANDLER
+  // ============================================================
+  async handleWebhook(
+    provider: PaymentProvider,
+    data: Record<string, any>,
+    ipAddress: string,
+  ): Promise<any> {
+    const gateway = this.gateways.get(provider);
+    if (!gateway) {
+      throw new BadRequestException(`Unsupported provider: ${provider}`);
+    }
+
+    // 1. VERIFY SIGNATURE
+    const verifyResult = gateway.verifyWebhook(data);
+    if (!verifyResult.isValid) {
+      this.logger.warn(
+        `⚠️ Invalid ${provider} signature from IP ${ipAddress}`,
+        { orderId: verifyResult.orderId },
+      );
+      return gateway.buildWebhookResponse(false, 'Invalid signature');
+    }
+
+    // 2. IDEMPOTENCY — SET NX atomic (chỉ 1 lần)
+    const idempotencyKey = `webhook:${provider}:${verifyResult.providerTransactionId}`;
+    const acquired = await this.redis.setNX(
+      idempotencyKey,
+      'processing',
+      WEBHOOK_IDEMPOTENCY_TTL,
+    );
+
+    if (!acquired) {
+      const status = await this.redis.get(idempotencyKey);
+      if (status === 'done') {
+        this.logger.log(
+          `Webhook already processed: ${provider} tx=${verifyResult.providerTransactionId}`,
+        );
+        return gateway.buildWebhookResponse(true, 'Already processed');
+      }
+      // Đang xử lý bởi request khác
+      return gateway.buildWebhookResponse(true, 'Processing');
+    }
+
+    // 3. FIND TRANSACTION
+    const transaction = await this.paymentRepo.findOne({
+      where: { cartId: verifyResult.orderId, provider },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!transaction) {
+      this.logger.error(
+        `Transaction not found: cart=${verifyResult.orderId} provider=${provider}`,
+      );
+      await this.redis.del(idempotencyKey); // release để retry
+      return gateway.buildWebhookResponse(false, 'Transaction not found');
+    }
+
+    // 4. VERIFY AMOUNT
+    if (Number(transaction.amount) !== verifyResult.amount) {
+      this.logger.error(
+        `Amount mismatch: expected=${transaction.amount} got=${verifyResult.amount}`,
+      );
+      await this.redis.del(idempotencyKey);
+      return gateway.buildWebhookResponse(false, 'Invalid amount');
+    }
+
+    // 5. ATOMIC UPDATE — state machine
+    const newStatus = verifyResult.isSuccess
+      ? PaymentStatus.SUCCESS
+      : PaymentStatus.FAILED;
+
+    try {
+      const result = await this.dataSource.transaction(async (manager) => {
+        const updateResult = await manager
+          .createQueryBuilder()
+          .update(PaymentTransaction)
+          .set({
+            status: newStatus,
+            providerTransactionId: verifyResult.providerTransactionId,
+            providerResponse: verifyResult.rawData,
+            paidAt: verifyResult.isSuccess ? new Date() : null,
+            errorMessage: verifyResult.isSuccess ? null : verifyResult.message,
+          })
+          .where('id = :id', { id: transaction.id })
+          .andWhere('status IN (:...statuses)', {
+            statuses: [PaymentStatus.PENDING, PaymentStatus.PROCESSING],
+          })
+          .execute();
+
+        if (updateResult.affected === 0) {
+          return { alreadyProcessed: true };
+        }
+
+        // Update Cart thay Order
+        if (verifyResult.isSuccess) {
+          await manager
+            .createQueryBuilder()
+            .update(Cart)
+            .set({
+              paymentStatus: CartPaymentStatus.PAID,
+              paidAt: new Date(),
+            })
+            .where('id = :id', { id: transaction.cartId })
+            .andWhere('payment_status = :status', {
+              status: CartPaymentStatus.UNPAID,
+            })
+            .execute();
+        }
+
+        return { alreadyProcessed: false };
+      });
+
+      if (result.alreadyProcessed) {
+        await this.redis.set(idempotencyKey, 'done', WEBHOOK_IDEMPOTENCY_TTL);
+        return gateway.buildWebhookResponse(true, 'Already processed');
+      }
+
+      // 6. Mark idempotency done
+      await this.redis.set(idempotencyKey, 'done', WEBHOOK_IDEMPOTENCY_TTL);
+
+      // 7. LOG
+      this.logger.log(
+        `✅ Webhook processed: ${provider} cart=${transaction.cartId} status=${newStatus}`,
+        {
+          transactionId: transaction.id,
+          providerTxId: verifyResult.providerTransactionId,
+          amount: verifyResult.amount,
+          ip: ipAddress,
+        },
+      );
+
+      // 8. RETURN
+      return gateway.buildWebhookResponse(true, 'Confirm Success');
+    } catch (error) {
+      // Release lock để gateway retry
+      await this.redis.del(idempotencyKey);
+      this.logger.error(
+        `❌ Webhook processing failed: ${provider} cart=${transaction.cartId}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  // ============================================================
+  // QUERY
+  // ============================================================
+  async getTransaction(userId: string, transactionId: string) {
+    const tx = await this.paymentRepo.findOne({
+      where: { id: transactionId, userId },
+    });
+    if (!tx) throw new NotFoundException('Transaction not found');
+    return tx;
+  }
+
+  async getTransactionsByCart(userId: string, cartId: string) {
+    return this.paymentRepo.find({
+      where: { cartId, userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+}
+</file>
+
 <file path="ecom-be/.env.example">
 # ===========================
 # App
@@ -5131,159 +4808,6 @@ MOMO_WHITELIST_IPS=
     ],
     "deleteOutDir": true
   }
-}
-</file>
-
-<file path="ecom-fe/app/(auth)/login/page.tsx">
-'use client'
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import {
-  Box,
-  Card,
-  Flex,
-  Heading,
-  Text,
-  TextField,
-  Button,
-  Link,
-  Checkbox,
-  Callout,
-} from '@radix-ui/themes';
-import { EnvelopeClosedIcon, LockClosedIcon } from '@radix-ui/react-icons';
-import { authService } from '@/lib/auth';
-
-export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      const { tokens, user } = await authService.login({ email, password });
-      authService.saveTokens(tokens);
-
-      // Redirect theo role
-      router.push(user.role === 'admin' ? '/admin' : '/');
-    } catch (err: any) {
-      setError(
-        err.response?.data?.message ||
-        'Email hoặc mật khẩu không đúng. Vui lòng thử lại.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Flex
-      align="center"
-      justify="center"
-      style={{ minHeight: '100vh', backgroundColor: 'var(--gray-2)' }}
-    >
-      <Box width="100%" maxWidth="400px" p="4">
-        <Flex direction="column" align="center" mb="5">
-          <Heading size="6" weight="bold" mb="1">
-            Chào mừng trở lại!
-          </Heading>
-          <Text size="2" color="gray">
-            Đăng nhập vào hệ thống quản lý của bạn
-          </Text>
-        </Flex>
-
-        <Card size="4">
-          <form onSubmit={handleSubmit}>
-            <Flex direction="column" gap="4">
-              {error && (
-                <Callout.Root color="red" size="1">
-                  <Callout.Text>{error}</Callout.Text>
-                </Callout.Root>
-              )}
-
-              {/* Email */}
-              <Box>
-                <Text as="label" size="2" weight="bold" mb="1">
-                  Email
-                </Text>
-                <TextField.Root
-                  type="email"
-                  placeholder="name@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  size="3"
-                  required
-                >
-                  <TextField.Slot>
-                    <EnvelopeClosedIcon height="16" width="16" />
-                  </TextField.Slot>
-                </TextField.Root>
-              </Box>
-
-              {/* Password */}
-              <Box>
-                <Flex justify="between" align="center" mb="1">
-                  <Text as="label" size="2" weight="bold">
-                    Mật khẩu
-                  </Text>
-                  <Link href="#" size="2">
-                    Quên mật khẩu?
-                  </Link>
-                </Flex>
-                <TextField.Root
-                  type="password"
-                  placeholder="Nhập mật khẩu của bạn"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  size="3"
-                  required
-                >
-                  <TextField.Slot>
-                    <LockClosedIcon height="16" width="16" />
-                  </TextField.Slot>
-                </TextField.Root>
-              </Box>
-
-              <Flex align="center" gap="2">
-                <Checkbox defaultChecked />
-                <Text size="2">Ghi nhớ đăng nhập</Text>
-              </Flex>
-
-              <Button
-                size="3"
-                variant="solid"
-                type="submit"
-                disabled={loading}
-                style={{ width: '100%', cursor: 'pointer' }}
-              >
-                {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
-              </Button>
-
-              <Button
-                size="3"
-                variant="outline"
-                type="button"
-                onClick={() => router.push('/register')}
-                style={{ cursor: 'pointer' }}
-              >
-                Đăng ký
-              </Button>
-            </Flex>
-          </form>
-        </Card>
-
-        <Flex justify="center" mt="4" gap="1">
-          <Text size="2" color="gray">Chưa có tài khoản?</Text>
-          <Link href="/register" size="2" weight="bold">Đăng ký ngay</Link>
-        </Flex>
-      </Box>
-    </Flex>
-  );
 }
 </file>
 
@@ -5482,37 +5006,430 @@ export default function RegisterPage() {
 }
 </file>
 
-<file path="ecom-fe/package.json">
-{
-  "name": "ecom-fe",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "@radix-ui/react-icons": "^1.3.2",
-    "@radix-ui/themes": "^3.3.0",
-    "axios": "^1.20.0",
-    "lucide-react": "^1.47.0",
-    "next": "16.3.6",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.6",
-    "tailwindcss": "^4",
-    "typescript": "^5"
-  }
+<file path="ecom-fe/app/(auth)/verify-otp/page.tsx">
+'use client'
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Box, Card, Flex, Heading, Text, TextField, Button, Callout } from '@radix-ui/themes';
+import { authService } from '@/lib/auth';
+
+function VerifyOtpContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const purpose = searchParams.get('purpose') || 'register';
+
+  const [email, setEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    const pending = sessionStorage.getItem('pendingEmail');
+    if (pending) setEmail(pending);
+  }, []);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(cooldown - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      if (purpose === 'register') {
+        const { user } = await authService.verifyRegisterOtp(email, otp);
+        sessionStorage.removeItem('pendingEmail');
+        router.push(user.role === 'admin' ? '/dashboard' : '/');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Xác thực thất bại');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    try {
+      await authService.resendOtp(email, purpose);
+      setCooldown(60);
+      setError('');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Không thể gửi lại OTP');
+    }
+  };
+
+  return (
+    <Flex align="center" justify="center" style={{ minHeight: '100vh', backgroundColor: 'var(--gray-2)' }}>
+      <Box width="100%" maxWidth="400px" p="4">
+        <Card size="4">
+          <Flex direction="column" gap="4">
+            <Heading size="6" align="center">Xác thực OTP</Heading>
+            <Text size="2" color="gray" align="center">
+              Mã OTP đã được gửi đến <strong>{email}</strong>
+            </Text>
+
+            {error && (
+              <Callout.Root color="red" size="1">
+                <Callout.Text>{error}</Callout.Text>
+              </Callout.Root>
+            )}
+
+            <form onSubmit={handleVerify}>
+              <Flex direction="column" gap="4">
+                <TextField.Root
+                  placeholder="Nhập mã OTP 6 chữ số"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  size="3"
+                  style={{ textAlign: 'center', fontSize: '24px', letterSpacing: '8px' }}
+                  required
+                />
+
+                <Button
+                  size="3"
+                  type="submit"
+                  disabled={loading || otp.length < 4}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {loading ? 'Đang xác thực...' : 'Xác thực'}
+                </Button>
+              </Flex>
+            </form>
+
+            <Button
+              variant="ghost"
+              onClick={handleResend}
+              disabled={cooldown > 0}
+              style={{ cursor: cooldown > 0 ? 'not-allowed' : 'pointer' }}
+            >
+              {cooldown > 0 ? `Gửi lại sau ${cooldown}s` : 'Gửi lại mã OTP'}
+            </Button>
+          </Flex>
+        </Card>
+      </Box>
+    </Flex>
+  );
 }
+
+export default function VerifyOtpPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <VerifyOtpContent />
+    </Suspense>
+  );
+}
+</file>
+
+<file path="ecom-fe/app/layout.tsx">
+'use client'
+import type { Metadata } from "next";
+import '@radix-ui/themes/styles.css';
+import { Theme } from '@radix-ui/themes';
+import "./globals.css";
+import { api } from '@/lib/api';
+import { useEffect } from "react";
+
+
+function AuthBootstrap({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    // Thử refresh một lần khi mount.
+    // Nếu user chưa login → 401 → bỏ qua.
+    api.post('/auth/refresh', {}, { withCredentials: true }).catch(() => {
+      // chưa login hoặc refresh token hết hạn → không làm gì
+    });
+  }, []);
+
+  return <>{children}</>;
+}
+
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="vi">
+      <body>
+        <Theme accentColor="teal" radius="full">
+          <AuthBootstrap>{children}</AuthBootstrap>
+        </Theme>
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="ecom-fe/lib/api.ts">
+// ecom-fe/lib/api.ts
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+
+export const api = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
+});
+
+// ============================================================
+// DEVICE ID — tạo một lần, lưu localStorage, gửi mọi request
+// ============================================================
+const DEVICE_ID_KEY = 'deviceId';
+
+export const getDeviceId = (): string => {
+  if (typeof window === 'undefined') return '';
+
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+
+  if (!deviceId || deviceId.length < 8) {
+    // crypto.randomUUID() trả về 36 ký tự — thỏa điều kiện >= 8
+    deviceId = crypto.randomUUID();
+    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+  }
+
+  return deviceId;
+};
+
+// ============================================================
+// HELPER đọc cookie (cho CSRF token)
+// ============================================================
+const getCookie = (name: string): string | null => {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(
+    new RegExp('(^|;\\s*)' + name + '=([^;]*)'),
+  );
+  return match ? decodeURIComponent(match[2]) : null;
+};
+
+// ============================================================
+// REQUEST INTERCEPTOR
+// ============================================================
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (typeof window !== 'undefined') {
+    // 1. Gắn device ID cho MỌI request
+    config.headers['X-Device-Id'] = getDeviceId();
+
+    // 2. Gắn CSRF token cho mọi request (nếu có)
+    const csrfToken = getCookie('csrfToken');
+    if (csrfToken) {
+      config.headers['X-CSRF-Token'] = csrfToken;
+    }
+
+    // 3. (Tùy chọn) Nếu vẫn dùng Bearer token ở một số nơi
+    const token = localStorage.getItem('accessToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+// ============================================================
+// RESPONSE INTERCEPTOR — refresh khi 401
+// ============================================================
+let isRefreshing = false;
+let queue: Array<() => void> = [];
+
+api.interceptors.response.use(
+  (res) => res,
+  async (error: AxiosError) => {
+    const original = error.config as InternalAxiosRequestConfig & {
+      _retry?: boolean;
+    };
+
+    if (original.url?.includes('/auth/refresh')) {
+      return Promise.reject(error);
+    }
+
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true;
+
+      if (isRefreshing) {
+        return new Promise((resolve) => {
+          queue.push(() => resolve(api(original)));
+        });
+      }
+
+      isRefreshing = true;
+      try {
+        await axios.post(
+          `${process.env.NEXT_PUBLIC_API_URL}/auth/refresh`,
+          {},
+          {
+            withCredentials: true,
+            headers: {
+              'X-Device-Id': getDeviceId(),
+              'X-CSRF-Token': getCookie('csrfToken') ?? '',
+            },
+          },
+        );
+
+        queue.forEach((cb) => cb());
+        queue = [];
+
+        return api(original);
+      } catch (err) {
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+        return Promise.reject(err);
+      } finally {
+        isRefreshing = false;
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
+</file>
+
+<file path="ecom-fe/lib/auth.ts">
+// ecom-fe/lib/auth.ts
+import { api } from './api';
+
+export interface RegisterPayload {
+  firstName: string;
+  lastName: string;
+  email: string;
+  username: string;
+  password: string;
+  phone?: string;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
+export interface User {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  username: string;
+  role: 'user' | 'admin';
+  avatar?: string | null;
+  isVerified: boolean;
+  phone?: string | null;
+}
+
+export interface AuthResponse {
+  user: User;
+  // Không còn accessToken — đã nằm trong cookie
+}
+
+// Helper: đọc cookie (dùng để biết user đã login chưa)
+const hasAuthCookie = (): boolean => {
+  if (typeof document === 'undefined') return false;
+  return /(^|;\s*)accessToken=/.test(document.cookie) ||
+    /(^|;\s*)refreshToken=/.test(document.cookie);
+};
+
+export const authService = {
+  register: async (payload: RegisterPayload) => {
+    const { data } = await api.post<{ message: string }>(
+      '/auth/register/send-otp',
+      payload,
+    );
+    return data;
+  },
+
+  verifyRegisterOtp: async (email: string, otp: string) => {
+    const { data } = await api.post<AuthResponse>(
+      '/auth/register/verify-otp',
+      { email, otp, purpose: 'register' },
+    );
+    return data; // { user }
+  },
+
+  resendOtp: async (email: string, purpose: string) => {
+    const { data } = await api.post<{ message: string }>('/auth/otp/resend', {
+      email,
+      purpose,
+    });
+    return data;
+  },
+
+  login: async (payload: LoginPayload) => {
+    const { data } = await api.post<AuthResponse>('/auth/login', payload);
+    return data; // { user }
+  },
+
+  logout: async () => {
+    await api.post('/auth/logout');
+    // Cookie đã bị backend clear
+  },
+
+  getProfile: async () => {
+    const { data } = await api.get<User>('/auth/profile');
+    return data;
+  },
+
+  // "Đã login" = có cookie hay không (chỉ là gợi ý, backend vẫn verify)
+  isAuthenticated: () => hasAuthCookie(),
+
+  // Không còn saveTokens / getAccessToken
+};
+</file>
+
+<file path="ecom-fe/middleware.ts">
+// ecom-fe/middleware.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+// Route cần đăng nhập
+const PROTECTED_ROUTES = ['/profile', '/orders', '/cart', '/checkout', '/dashboard'];
+
+// Route chỉ admin
+const ADMIN_ROUTES = ['/dashboard'];
+
+// Route auth (nếu đã login thì không cho vào)
+const AUTH_ROUTES = ['/login', '/register', '/verify-otp'];
+
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  // Lưu ý: accessToken được lưu trong localStorage, không phải cookie.
+  // Middleware không thể đọc localStorage.
+  // => Giải pháp tạm thời: Dùng cookie để lưu accessToken (không khuyến khích vì bảo mật)
+  // hoặc chấp nhận việc middleware không bảo vệ được và dựa vào client-side check trong layout.
+  // Trong ví dụ này, tôi sẽ giả định accessToken được lưu trong cookie để middleware hoạt động.
+  const accessToken = request.cookies.get('accessToken')?.value;
+  const isAuthenticated = !!accessToken;
+
+  // 1. Đã login mà vào /login, /register → chuyển về trang chủ
+  if (AUTH_ROUTES.some((route) => pathname.startsWith(route)) && isAuthenticated) {
+    return NextResponse.redirect(new URL('/', request.url));
+  }
+
+  // 2. Chưa login mà vào route protected → chuyển về /login (kèm redirect)
+  if (
+    PROTECTED_ROUTES.some((route) => pathname.startsWith(route)) &&
+    !isAuthenticated
+  ) {
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('redirect', pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // 3. Vào /dashboard mà không phải admin → chặn (cần role)
+  // Middleware không decode JWT dễ dàng nếu dùng secret khác.
+  // → Nên check role ở server component hoặc API riêng.
+  // Trong layout của dashboard, chúng ta đã check role.
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: [
+    /*
+     * Match tất cả request trừ:
+     * - _next/static, _next/image (static files)
+     * - favicon.ico
+     * - public files (svg, png, jpg...)
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+  ],
+};
 </file>
 
 <file path=".env.example">
@@ -5751,6 +5668,54 @@ export const OtpPurpose = {
 } as const;
 
 export type OtpPurposeType = (typeof OtpPurpose)[keyof typeof OtpPurpose];
+</file>
+
+<file path="ecom-be/src/modules/auth/strategies/jwt.strategy.ts">
+// src/modules/auth/strategies/jwt.strategy.ts
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { ConfigService } from '@nestjs/config';
+import type { Request } from 'express';
+import { UserService } from '../../user/user.service';
+import { TokenPayload } from '../interface/token-payload.interface';
+
+// Custom extractor: đọc JWT từ cookie
+const cookieExtractor = (req: Request): string | null => {
+  if (req && req.cookies) {
+    return req.cookies['accessToken'] ?? null;
+  }
+  return null;
+};
+
+// Fallback: vẫn cho phép Bearer token (dùng cho mobile app / Swagger)
+const combinedExtractor = (req: Request): string | null => {
+  const fromCookie = cookieExtractor(req);
+  if (fromCookie) return fromCookie;
+  return ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+};
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly userService: UserService,
+  ) {
+    super({
+      jwtFromRequest: combinedExtractor,
+      ignoreExpiration: false,
+      secretOrKey: configService.get<string>('JWT_ACCESS_SECRET'),
+    });
+  }
+
+  async validate(payload: TokenPayload) {
+    const user = await this.userService.findOne(payload.sub);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    return user;
+  }
+}
 </file>
 
 <file path="ecom-be/src/modules/user/user.controller.ts">
@@ -6178,6 +6143,199 @@ volumes:
   redis_data:
 </file>
 
+<file path="ecom-fe/app/(auth)/login/page.tsx">
+'use client'
+import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  Box,
+  Card,
+  Flex,
+  Heading,
+  Text,
+  TextField,
+  Button,
+  Link,
+  Checkbox,
+  Callout,
+} from '@radix-ui/themes';
+import { EnvelopeClosedIcon, LockClosedIcon } from '@radix-ui/react-icons';
+import { authService } from '@/lib/auth';
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      const { user } = await authService.login({ email, password });
+      // Không có token để lưu — cookie đã tự set
+
+      // Gọi merge guest cart
+      try {
+        await api.post('/carts/merge');
+      } catch {
+        // bỏ qua nếu không có guest cart
+      }
+
+      router.push(user.role === 'admin' ? '/dashboard' : '/');
+    } catch (err: any) {
+      setError(
+        err.response?.data?.message ||
+        'Email hoặc mật khẩu không đúng. Vui lòng thử lại.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Flex
+      align="center"
+      justify="center"
+      style={{ minHeight: '100vh', backgroundColor: 'var(--gray-2)' }}
+    >
+      <Box width="100%" maxWidth="400px" p="4">
+        <Flex direction="column" align="center" mb="5">
+          <Heading size="6" weight="bold" mb="1">
+            Chào mừng trở lại!
+          </Heading>
+          <Text size="2" color="gray">
+            Đăng nhập vào hệ thống quản lý của bạn
+          </Text>
+        </Flex>
+
+        <Card size="4">
+          <form onSubmit={handleSubmit}>
+            <Flex direction="column" gap="4">
+              {error && (
+                <Callout.Root color="red" size="1">
+                  <Callout.Text>{error}</Callout.Text>
+                </Callout.Root>
+              )}
+
+              {/* Email */}
+              <Box>
+                <Text as="label" size="2" weight="bold" mb="1">
+                  Email
+                </Text>
+                <TextField.Root
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  size="3"
+                  required
+                >
+                  <TextField.Slot>
+                    <EnvelopeClosedIcon height="16" width="16" />
+                  </TextField.Slot>
+                </TextField.Root>
+              </Box>
+
+              {/* Password */}
+              <Box>
+                <Flex justify="between" align="center" mb="1">
+                  <Text as="label" size="2" weight="bold">
+                    Mật khẩu
+                  </Text>
+                  <Link href="#" size="2">
+                    Quên mật khẩu?
+                  </Link>
+                </Flex>
+                <TextField.Root
+                  type="password"
+                  placeholder="Nhập mật khẩu của bạn"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  size="3"
+                  required
+                >
+                  <TextField.Slot>
+                    <LockClosedIcon height="16" width="16" />
+                  </TextField.Slot>
+                </TextField.Root>
+              </Box>
+
+              <Flex align="center" gap="2">
+                <Checkbox defaultChecked />
+                <Text size="2">Ghi nhớ đăng nhập</Text>
+              </Flex>
+
+              <Button
+                size="3"
+                variant="solid"
+                type="submit"
+                disabled={loading}
+                style={{ width: '100%', cursor: 'pointer' }}
+              >
+                {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+              </Button>
+
+              <Button
+                size="3"
+                variant="outline"
+                type="button"
+                onClick={() => router.push('/register')}
+                style={{ cursor: 'pointer' }}
+              >
+                Đăng ký
+              </Button>
+            </Flex>
+          </form>
+        </Card>
+
+        <Flex justify="center" mt="4" gap="1">
+          <Text size="2" color="gray">Chưa có tài khoản?</Text>
+          <Link href="/register" size="2" weight="bold">Đăng ký ngay</Link>
+        </Flex>
+      </Box>
+    </Flex>
+  );
+}
+</file>
+
+<file path="ecom-fe/package.json">
+{
+  "name": "ecom-fe",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@radix-ui/react-icons": "^1.3.2",
+    "@radix-ui/themes": "^3.3.0",
+    "axios": "^1.20.0",
+    "lucide-react": "^1.47.0",
+    "next": "16.3.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-icons": "^5.7.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+</file>
+
 <file path="ecom-be/src/infrastructure/redis/redis.service.ts">
 // src/infrastructure/redis/redis.service.ts
 import { Injectable, Logger } from '@nestjs/common';
@@ -6539,7 +6697,7 @@ export class AuthController {
    * Rate limit: 5 lần / 15 phút — chống brute force password
    */
   @Post('login')
-  @Throttle({ default: { ttl: 900_000, limit: 5 } }) // 15p / 5 lần
+  @Throttle({ default: { ttl: 900_000, limit: 100 } }) // 15p / 5 lần
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() loginDto: LoginDto,
@@ -6728,6 +6886,7 @@ import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { ProductModule } from './modules/product/product.module';
 import { CartModule } from './modules/cart/cart.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { CsrfGuard } from './common/guards/csrf.guard';
 
 @Module({
   imports: [
@@ -6808,6 +6967,7 @@ import { PaymentModule } from './modules/payment/payment.module';
       provide: APP_GUARD,
       useClass: UserThrottlerGuard,
     },
+    { provide: APP_GUARD, useClass: CsrfGuard },
   ],
 })
 export class AppModule { }
@@ -6836,14 +6996,22 @@ import { UserRole } from 'src/common/enums/user-role.enum';
 import { TokenPayload } from './interface/token-payload.interface';
 import { AuthResponse } from './interface/auth-response.interface';
 import { RefreshResponse } from './interface/refresh-response.interface';
+import { randomBytes } from 'crypto';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  private readonly ACCESS_COOKIE_NAME = 'accessToken';
   private readonly REFRESH_COOKIE_NAME = 'refreshToken';
   private readonly DEVICE_COOKIE_NAME = 'deviceId';
+  private readonly CSRF_COOKIE_NAME = 'csrfToken';
+
+  private readonly COOKIE_PATH = '/';
   private readonly REFRESH_COOKIE_PATH = '/api/auth';
+  private readonly REFRESH_PATH = '/api/auth';
+
+  private readonly ACCESS_TTL_MS = 15 * 60 * 1000; // 15 phút
   private readonly REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
   constructor(
@@ -6934,7 +7102,7 @@ export class AuthService {
     );
 
     if (!isValid) {
-      // ⚠️ Token reuse hoặc session hết hạn → revoke hết
+      //Token reuse hoặc session hết hạn → revoke hết
       this.logger.warn(
         `Possible token reuse: user=${userId} device=${deviceId} — revoking all sessions`,
       );
@@ -6954,9 +7122,9 @@ export class AuthService {
     const accessToken = await this.signAccessToken(user);
 
     // 4. Set cookie mới
-    this.setAuthCookies(res, newRefreshToken, deviceId);
+    this.setAuthCookies(res, accessToken, newRefreshToken, deviceId);
 
-    return { accessToken };
+    return { message: 'Token refreshed' };
   }
 
   async logout(
@@ -7005,10 +7173,10 @@ export class AuthService {
     );
 
     const accessToken = await this.signAccessToken(user);
-    this.setAuthCookies(res, refreshToken, deviceId);
+    this.setAuthCookies(res, accessToken, refreshToken, deviceId);
 
     const { password, ...userWithoutPassword } = user;
-    return { user: userWithoutPassword, accessToken };
+    return { user: userWithoutPassword };
   }
 
   /**
@@ -7035,6 +7203,7 @@ export class AuthService {
    */
   private setAuthCookies(
     res: Response,
+    accessToken: string,
     refreshToken: string,
     deviceId: string,
   ): void {
@@ -7049,10 +7218,34 @@ export class AuthService {
       path: this.REFRESH_COOKIE_PATH,
     };
 
-    res.cookie(this.REFRESH_COOKIE_NAME, refreshToken, baseOptions);
+    res.cookie(this.ACCESS_COOKIE_NAME, accessToken, {
+      ...baseOptions,
+      maxAge: this.ACCESS_TTL_MS,
+      path: '/',
+    });
+
+    // 2. Refresh token — chỉ gửi cho /api/auth/*
+    res.cookie(this.REFRESH_COOKIE_NAME, refreshToken, {
+      ...baseOptions,
+      maxAge: this.REFRESH_TTL_MS,
+      path: this.REFRESH_PATH,
+    });
+
+    // 3. Device ID — non-httpOnly (frontend cần đọc để gửi header)
     res.cookie(this.DEVICE_COOKIE_NAME, deviceId, {
       ...baseOptions,
-      httpOnly: false, // client có thể đọc để debug / hiển thị
+      httpOnly: false,
+      maxAge: this.REFRESH_TTL_MS,
+      path: '/',
+    });
+
+    // 4. CSRF token — non-httpOnly (frontend phải đọc để gửi header)
+    const csrfToken = randomBytes(32).toString('hex');
+    res.cookie(this.CSRF_COOKIE_NAME, csrfToken, {
+      ...baseOptions,
+      httpOnly: false,
+      maxAge: this.REFRESH_TTL_MS,
+      path: '/',
     });
   }
 
@@ -7060,9 +7253,10 @@ export class AuthService {
    * Clear cookie khi logout / revoke
    */
   private clearAuthCookies(res: Response): void {
-    const opts = { path: this.REFRESH_COOKIE_PATH };
-    res.clearCookie(this.REFRESH_COOKIE_NAME, opts);
-    res.clearCookie(this.DEVICE_COOKIE_NAME, opts);
+    res.clearCookie(this.ACCESS_COOKIE_NAME, { path: '/' });
+    res.clearCookie(this.REFRESH_COOKIE_NAME, { path: this.REFRESH_PATH });
+    res.clearCookie(this.DEVICE_COOKIE_NAME, { path: '/' });
+    res.clearCookie(this.CSRF_COOKIE_NAME, { path: '/' });
   }
   async resolveRefreshToken(
     refreshToken: string,

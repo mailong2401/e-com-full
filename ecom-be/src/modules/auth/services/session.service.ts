@@ -106,6 +106,8 @@ export class SessionService {
   /**
    * Rotate refresh token — cấp token mới, vô hiệu token cũ
    */
+  // src/modules/auth/services/session.service.ts
+
   async rotateSession(
     userId: string,
     deviceId: string,
@@ -119,6 +121,13 @@ export class SessionService {
 
     const newRefreshToken = randomBytes(48).toString('hex');
     const newHash = this.hashToken(newRefreshToken);
+
+    // Lưu hash cũ vào grace list (5 giây) — tránh race condition
+    await this.redis.set(
+      `grace:${userId}:${deviceId}:${existing.refreshTokenHash}`,
+      '1',
+      5, // 5 giây
+    );
 
     const updated: SessionData = {
       ...existing,
@@ -134,22 +143,15 @@ export class SessionService {
       this.SESSION_TTL,
     );
 
-    // Lưu mapping cho token mới
     await this.redis.setJson(
       `refresh:${newRefreshToken}`,
       { userId, deviceId },
       this.SESSION_TTL,
     );
 
-    // Token cũ vẫn còn mapping `refresh:{oldToken}` → tự hết hạn theo TTL
-    // Nếu attacker dùng lại token cũ → resolve OK → verify fail → revoke all
-
     return { refreshToken: newRefreshToken, familyId: existing.familyId };
   }
 
-  /**
-   * Verify refresh token với hash trong session
-   */
   async verifyRefreshToken(
     userId: string,
     deviceId: string,
@@ -157,7 +159,26 @@ export class SessionService {
   ): Promise<boolean> {
     const session = await this.getSession(userId, deviceId);
     if (!session) return false;
-    return this.hashToken(plainToken) === session.refreshTokenHash;
+
+    const incomingHash = this.hashToken(plainToken);
+
+    // 1. Khớp hash hiện tại → OK
+    if (incomingHash === session.refreshTokenHash) {
+      return true;
+    }
+
+    // 2. Kiểm tra grace list — token cũ vừa rotate trong 5s
+    const inGrace = await this.redis.exists(
+      `grace:${userId}:${deviceId}:${incomingHash}`,
+    );
+    if (inGrace) {
+      this.logger.warn(
+        `Token in grace period accepted: user=${userId} device=${deviceId}`,
+      );
+      return true;
+    }
+
+    return false;
   }
 
   /**
