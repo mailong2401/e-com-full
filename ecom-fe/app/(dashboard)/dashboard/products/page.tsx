@@ -7,7 +7,7 @@ import {
   Table,
   Button,
   Flex,
-  Box,
+  Card,
   Text,
   Badge,
   TextField,

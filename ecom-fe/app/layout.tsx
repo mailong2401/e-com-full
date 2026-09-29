@@ -3,18 +3,23 @@ import type { Metadata } from "next";
 import '@radix-ui/themes/styles.css';
 import { Theme } from '@radix-ui/themes';
 import "./globals.css";
+import { AuthProvider } from '@/hooks/useAuth';
 
 export const metadata: Metadata = {
   title: "E-Commerce",
   description: "Hệ thống thương mại điện tử",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="vi">
       <body>
-        <Theme accentColor="teal" radius="full">
-          {children}
+        <Theme accentColor="teal" radius="medium">
+          <AuthProvider>{children}</AuthProvider>
         </Theme>
       </body>
     </html>
