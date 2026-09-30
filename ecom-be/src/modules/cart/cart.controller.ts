@@ -77,6 +77,8 @@ export class CartController {
    * Rate limit: 30 lần / phút
    */
   @Patch('items/:itemId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
   @Throttle({ default: { ttl: 60_000, limit: 30 } })
   async updateItem(
     @CurrentUser() user: User | undefined,
@@ -101,6 +103,8 @@ export class CartController {
    * Rate limit: 30 lần / phút
    */
   @Delete('items/:itemId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
   @Throttle({ default: { ttl: 60_000, limit: 30 } })
   async removeItem(
     @CurrentUser() user: User | undefined,

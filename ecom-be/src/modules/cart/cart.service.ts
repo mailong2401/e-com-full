@@ -165,8 +165,7 @@ export class CartService {
     }
 
     // Touch cart để cập nhật updatedAt
-    cart.updatedAt = new Date();
-    await this.cartRepository.save(cart);
+    await this.cartRepository.update(cart.id, { updatedAt: new Date() });
 
     await this.invalidateCache(cart.id);
     this.logger.log(
@@ -214,16 +213,41 @@ export class CartService {
       );
     }
 
-    item.quantity = dto.quantity;
-    // Cập nhật snapshot giá mới (vì user đang chủ động thay đổi)
-    item.priceSnapshot = product.salePrice ?? product.price;
-    await this.cartItemRepository.save(item);
+    const effectivePrice = product.salePrice ?? product.price;
 
-    cart.updatedAt = new Date();
-    await this.cartRepository.save(cart);
+    // Dùng phương pháp update trực tiếp qua Repository để ép DB nhận giá trị mới ngay lập tức
+    await this.cartItemRepository.update(
+      { id: item.id },
+      {
+        quantity: dto.quantity,
+        priceSnapshot: effectivePrice,
+      },
+    );
 
+    // Cập nhật lại thời gian cart
+    await this.cartRepository.update(cart.id, { updatedAt: new Date() });
+
+    // Xóa cache cũ trong Redis
     await this.invalidateCache(cart.id);
-    return this.getSummary(cart.id);
+
+    this.logger.log(`Cart item updated: item=${itemId} qty=${dto.quantity}`);
+
+    // Để chắc chắn không bị dính cache cũ, ta gọi thẳng buildSummary từ DB lên thay vì qua tầng cache ở getSummary
+    return this.getFreshSummary(cart.id);
+  }
+
+  private async getFreshSummary(cartId: string): Promise<CartSummary> {
+    await this.invalidateCache(cartId); // Đảm bảo xóa sạch cache
+    const cart = await this.cartRepository.findOne({
+      where: { id: cartId },
+      relations: {
+        items: {
+          product: true,
+        },
+      },
+    });
+    if (!cart) throw new NotFoundException('Cart not found');
+    return this.buildSummary(cart);
   }
 
   // ============================================================
@@ -235,11 +259,13 @@ export class CartService {
     deviceId: string | null,
     itemId: string,
   ): Promise<CartSummary> {
+    console.log('userid: ', userId);
     const cart = await this.getOrCreateCart(userId, deviceId);
 
     const item = await this.cartItemRepository.findOne({
       where: { id: itemId, cartId: cart.id },
     });
+
     if (!item) {
       throw new NotFoundException('Cart item not found');
     }
