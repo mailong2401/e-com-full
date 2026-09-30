@@ -21,6 +21,9 @@ import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/modules/auth/decorators/current-user.decorator';
 import { User } from '../user/user.entity';
 import { DeviceId } from 'src/common/decorators/device-id.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { UserRole } from 'src/common/enums/user-role.enum';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('carts')
 export class CartController {
@@ -35,6 +38,7 @@ export class CartController {
    * Rate limit: 100 lần / phút
    */
   @Get('me')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Throttle({ default: { ttl: 60_000, limit: 100 } })
   async getMyCart(
     @CurrentUser() user: User | undefined,
@@ -52,6 +56,8 @@ export class CartController {
    * Rate limit: 30 lần / phút
    */
   @Post('items')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.USER)
   @Throttle({ default: { ttl: 60_000, limit: 30 } })
   @HttpCode(HttpStatus.OK)
   async addItem(

@@ -1,8 +1,13 @@
 // ecom-fe/lib/routes.ts
-export const PROTECTED_ROUTES = ['/profile', '/orders', '/cart', '/checkout'];
+export const PROTECTED_ROUTES = [
+  '/profile',
+  '/orders',
+  '/cart',
+  '/checkout',
+  '/payment/return',
+];
 export const ADMIN_ROUTES = ['/dashboard'];
 export const AUTH_ROUTES = ['/login', '/register', '/verify-otp'];
-
 const matches = (pathname: string, routes: string[]) =>
   routes.some((r) => pathname === r || pathname.startsWith(r + '/'));
 

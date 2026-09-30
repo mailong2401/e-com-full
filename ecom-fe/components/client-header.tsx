@@ -3,6 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useCartCount } from '@/hooks/useCartCount';
 import { useState } from 'react';
 import {
   Flex,
@@ -38,6 +39,7 @@ export function ClientHeader() {
   const router = useRouter();
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { count } = useCartCount();
 
   const handleLogout = async () => {
     if (confirm('Bạn có chắc chắn muốn đăng xuất?')) {
@@ -109,9 +111,16 @@ export function ClientHeader() {
         {/* Right actions */}
         <Flex align="center" gap="3">
           {/* Cart button */}
-          <Button variant="soft" size="2">
-            <CiShoppingCart /> Giỏ hàng
-          </Button>
+          <Link href="/cart" style={{ textDecoration: 'none' }}>
+            <Button variant="soft" size="2" style={{ cursor: 'pointer' }}>
+              <CiShoppingCart /> Giỏ hàng
+              {count > 0 && (
+                <Badge color="red" size="1" ml="1">
+                  {count}
+                </Badge>
+              )}
+            </Button>
+          </Link>
 
           {/* User area */}
           {loading ? (

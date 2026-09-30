@@ -90,7 +90,7 @@ export class AuthService {
     const user = await this.userService.findByEmailWithPassword(loginDto.email);
 
     if (!user || !user.password) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Sai tài khoản hoặc mật khẩu');
     }
 
     const isPasswordValid = await this.userService.validatePassword(
@@ -99,7 +99,7 @@ export class AuthService {
     );
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Sai tài khoản hoặc mật khẩu');
     }
     if (!user.isVerified) {
       throw new UnauthorizedException(
