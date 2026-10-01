@@ -1,6 +1,8 @@
+// src/modules/product/dto/query-product.dto.ts
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -11,6 +13,11 @@ import {
 } from 'class-validator';
 import { ProductStatus } from 'src/common/enums/product-status.enum';
 import { ProductSortBy } from 'src/common/enums/product-sort-by.enum';
+
+export enum PaginationMode {
+  CURSOR = 'cursor',
+  OFFSET = 'offset',
+}
 
 export class QueryProductDto {
   @IsString()
@@ -45,13 +52,26 @@ export class QueryProductDto {
   @IsOptional()
   sortBy?: ProductSortBy = ProductSortBy.CREATED_AT;
 
-  @IsString()
+  @IsIn(['ASC', 'DESC'])
   @IsOptional()
   order?: 'ASC' | 'DESC' = 'DESC';
 
+  // ===== Pagination =====
+  @IsEnum(PaginationMode)
+  @IsOptional()
+  paginationMode?: PaginationMode = PaginationMode.CURSOR;
+
+  // Cursor mode
   @IsUUID()
   @IsOptional()
   cursor?: string;
+
+  // Offset mode
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  page?: number = 1;
 
   @Type(() => Number)
   @IsInt()

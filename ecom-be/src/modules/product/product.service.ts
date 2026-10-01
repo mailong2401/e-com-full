@@ -6,24 +6,15 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { Product } from './product.entity';
 import { ProductStatus } from 'src/common/enums/product-status.enum';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { QueryProductDto } from './dto/query-product.dto';
+import { QueryProductDto, PaginationMode } from './dto/query-product.dto';
 import { ProductSortBy } from 'src/common/enums/product-sort-by.enum';
 import { CacheService } from 'src/common/utils/cache.util';
 
-export interface PaginatedProducts {
-  data: Product[];
-  meta: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  };
-}
 export interface CursorPaginatedProducts {
   data: Product[];
   meta: {
@@ -33,6 +24,20 @@ export interface CursorPaginatedProducts {
     hasNextPage: boolean;
   };
 }
+
+export interface OffsetPaginatedProducts {
+  data: Product[];
+  meta: {
+    paginationMode: 'offset';
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export type PaginatedProducts =
+  CursorPaginatedProducts | OffsetPaginatedProducts;
 
 @Injectable()
 export class ProductService {
@@ -105,7 +110,7 @@ export class ProductService {
   /**
    * List với filter, search, sort, pagination
    */
-  async findAll(query: QueryProductDto): Promise<CursorPaginatedProducts> {
+  async findAll(query: QueryProductDto): Promise<PaginatedProducts> {
     const {
       search,
       category,
@@ -115,87 +120,126 @@ export class ProductService {
       status,
       sortBy = ProductSortBy.CREATED_AT,
       order = 'DESC',
+      paginationMode = PaginationMode.CURSOR,
       cursor,
+      page = 1,
       limit = 20,
     } = query;
 
-    const qb = this.productRepository.createQueryBuilder('p');
-
-    // ============ FILTERS ============
-    if (search) {
-      qb.andWhere('(p.name ILIKE :search OR p.description ILIKE :search)', {
-        search: `%${search}%`,
+    // ==================== OFFSET MODE ====================
+    // Offset hỗ trợ MỌI sortBy
+    if (paginationMode === PaginationMode.OFFSET) {
+      const qb = this.productRepository.createQueryBuilder('p');
+      this.applyFilters(qb, {
+        search,
+        category,
+        brand,
+        minPrice,
+        maxPrice,
+        status,
       });
-    }
-    if (category) qb.andWhere('p.category = :category', { category });
-    if (brand) qb.andWhere('p.brand = :brand', { brand });
-    if (status) qb.andWhere('p.status = :status', { status });
-    if (minPrice !== undefined)
-      qb.andWhere('p.price >= :minPrice', { minPrice });
-    if (maxPrice !== undefined)
-      qb.andWhere('p.price <= :maxPrice', { maxPrice });
 
-    // ============ SORT ============
-    const validSortFields = Object.values(ProductSortBy);
-    const sortField = validSortFields.includes(sortBy)
-      ? sortBy
-      : ProductSortBy.CREATED_AT;
-    const sortDir = order === 'ASC' ? 'ASC' : 'DESC';
+      const sortField = Object.values(ProductSortBy).includes(sortBy)
+        ? sortBy
+        : ProductSortBy.CREATED_AT;
+      const sortDir = order === 'ASC' ? 'ASC' : 'DESC';
 
-    // ============ CURSOR LOGIC ============
-    const useCursor = sortField === ProductSortBy.CREATED_AT;
+      qb.orderBy(`p.${sortField}`, sortDir)
+        .addOrderBy('p.id', 'DESC') // secondary sort để ổn định
+        .skip((page - 1) * limit)
+        .take(limit);
 
-    if (useCursor) {
-      // Cursor sort theo id (UUIDv7 = time-ordered)
-      qb.orderBy('p.id', sortDir);
-
-      if (cursor) {
-        // DESC (mới → cũ): id < cursor
-        // ASC  (cũ → mới): id > cursor
-        if (sortDir === 'DESC') {
-          qb.andWhere('p.id < :cursor', { cursor });
-        } else {
-          qb.andWhere('p.id > :cursor', { cursor });
-        }
-      }
-
-      // Lấy dư 1 để check còn trang sau không
-      qb.take(limit + 1);
-
-      const products = await qb.getMany();
-
-      const hasNextPage = products.length > limit;
-      if (hasNextPage) {
-        products.pop(); // bỏ item dư
-      }
-
-      const nextCursor =
-        hasNextPage && products.length > 0
-          ? products[products.length - 1].id
-          : null;
+      const [data, total] = await qb.getManyAndCount();
 
       return {
-        data: products,
+        data,
         meta: {
-          paginationMode: 'cursor',
+          paginationMode: 'offset',
+          total,
+          page,
           limit,
-          nextCursor,
-          hasNextPage,
+          totalPages: Math.ceil(total / limit),
         },
       };
     }
 
-    // ============ FALLBACK: OFFSET (khi sort theo cột khác) ============
-    qb.orderBy(`p.${sortField}`, sortDir).addOrderBy('p.id', 'DESC'); // secondary sort để ổn định
+    // ==================== CURSOR MODE ====================
+    // Cursor CHỈ hỗ trợ sortBy = createdAt (vì dùng id UUIDv7 time-ordered)
+    if (sortBy !== ProductSortBy.CREATED_AT) {
+      throw new BadRequestException(
+        'Cursor pagination chỉ hỗ trợ sortBy=createdAt. ' +
+        'Dùng paginationMode=offset cho sortBy khác.',
+      );
+    }
 
-    // Không có page param nữa → dùng cursor như id
-    // Với trường hợp này, cursor = id của item cuối
-    // nhưng sort chính không phải id → phải dùng offset
-    // → Bạn có thể throw lỗi hoặc fallback default
-    throw new BadRequestException(
-      'Cursor pagination chỉ hỗ trợ sortBy=createdAt. ' +
-      'Với sortBy khác, vui lòng dùng endpoint khác.',
-    );
+    const qb = this.productRepository.createQueryBuilder('p');
+    this.applyFilters(qb, {
+      search,
+      category,
+      brand,
+      minPrice,
+      maxPrice,
+      status,
+    });
+
+    const sortDir = order === 'ASC' ? 'ASC' : 'DESC';
+    qb.orderBy('p.id', sortDir);
+
+    if (cursor) {
+      if (sortDir === 'DESC') {
+        qb.andWhere('p.id < :cursor', { cursor });
+      } else {
+        qb.andWhere('p.id > :cursor', { cursor });
+      }
+    }
+
+    qb.take(limit + 1); // lấy dư 1 để check hasNextPage
+
+    const products = await qb.getMany();
+    const hasNextPage = products.length > limit;
+    if (hasNextPage) products.pop();
+
+    const nextCursor =
+      hasNextPage && products.length > 0
+        ? products[products.length - 1].id
+        : null;
+
+    return {
+      data: products,
+      meta: {
+        paginationMode: 'cursor',
+        limit,
+        nextCursor,
+        hasNextPage,
+      },
+    };
+  }
+
+  // Helper: apply filters dùng chung cho cả 2 mode
+  private applyFilters(
+    qb: SelectQueryBuilder<Product>,
+    f: {
+      search?: string;
+      category?: string;
+      brand?: string;
+      minPrice?: number;
+      maxPrice?: number;
+      status?: ProductStatus;
+    },
+  ): void {
+    if (f.search) {
+      qb.andWhere('(p.name ILIKE :search OR p.description ILIKE :search)', {
+        search: `%${f.search}%`,
+      });
+    }
+    if (f.category)
+      qb.andWhere('p.category = :category', { category: f.category });
+    if (f.brand) qb.andWhere('p.brand = :brand', { brand: f.brand });
+    if (f.status) qb.andWhere('p.status = :status', { status: f.status });
+    if (f.minPrice !== undefined)
+      qb.andWhere('p.price >= :minPrice', { minPrice: f.minPrice });
+    if (f.maxPrice !== undefined)
+      qb.andWhere('p.price <= :maxPrice', { maxPrice: f.maxPrice });
   }
 
   async findOne(id: string): Promise<Product> {

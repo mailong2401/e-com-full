@@ -1,6 +1,8 @@
 // ecom-fe/lib/products.ts
 import { api } from './api';
 
+export type PaginationMode = 'cursor' | 'offset';
+
 export interface Product {
   id: string;
   name: string;
@@ -25,15 +27,29 @@ export interface ProductQuery {
   brand?: string;
   minPrice?: number;
   maxPrice?: number;
+  status?: 'draft' | 'active' | 'inactive' | 'out_of_stock';
   sortBy?: 'createdAt' | 'price' | 'rating' | 'name';
   order?: 'ASC' | 'DESC';
+  paginationMode?: PaginationMode;
+  cursor?: string;
   page?: number;
   limit?: number;
 }
 
-export interface PaginatedProducts {
+export interface CursorPaginatedProducts {
   data: Product[];
   meta: {
+    paginationMode: 'cursor';
+    limit: number;
+    nextCursor: string | null;
+    hasNextPage: boolean;
+  };
+}
+
+export interface OffsetPaginatedProducts {
+  data: Product[];
+  meta: {
+    paginationMode: 'offset';
     total: number;
     page: number;
     limit: number;
@@ -41,12 +57,38 @@ export interface PaginatedProducts {
   };
 }
 
+export type PaginatedProducts =
+  | CursorPaginatedProducts
+  | OffsetPaginatedProducts;
+
 export const productService = {
-  list: async (query: ProductQuery = {}): Promise<PaginatedProducts> => {
-    const { data } = await api.get<PaginatedProducts>('/products', {
+  /** Cursor mode — sortBy mặc định createdAt (backend chỉ hỗ trợ cursor với createdAt) */
+  listCursor: async (
+    query: Omit<ProductQuery, 'paginationMode' | 'page'> = {},
+  ): Promise<CursorPaginatedProducts> => {
+    const { data } = await api.get<CursorPaginatedProducts>('/products', {
       params: {
         ...query,
-        status: 'active', // chỉ hiện sản phẩm đang bán
+        paginationMode: 'cursor',
+        sortBy: 'createdAt',
+        status: query.status ?? 'active',
+        limit: query.limit ?? 12,
+      },
+    });
+    return data;
+  },
+
+  /** Offset mode — dùng cho UI có nút phân trang, hỗ trợ mọi sortBy */
+  listOffset: async (
+    query: Omit<ProductQuery, 'paginationMode' | 'cursor'> = {},
+  ): Promise<OffsetPaginatedProducts> => {
+    const { data } = await api.get<OffsetPaginatedProducts>('/products', {
+      params: {
+        ...query,
+        paginationMode: 'offset',
+        status: query.status ?? 'active',
+        limit: query.limit ?? 12,
+        page: query.page ?? 1,
       },
     });
     return data;
