@@ -1,4 +1,3 @@
-// src/modules/product/dto/query-product.dto.ts
 import { Type } from 'class-transformer';
 import {
   IsEnum,
@@ -6,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   Min,
 } from 'class-validator';
@@ -49,11 +49,9 @@ export class QueryProductDto {
   @IsOptional()
   order?: 'ASC' | 'DESC' = 'DESC';
 
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsUUID()
   @IsOptional()
-  page?: number = 1;
+  cursor?: string;
 
   @Type(() => Number)
   @IsInt()

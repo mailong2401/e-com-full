@@ -7,7 +7,7 @@ export abstract class BaseEntity {
   id!: string;
 
   @BeforeInsert()
-  generateId() {
+  protected generateId() {
     if (!this.id) {
       this.id = uuidv7();
     }

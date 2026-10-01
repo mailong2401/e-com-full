@@ -52,7 +52,6 @@ export class PaymentService {
     dto: CreatePaymentDto,
     ipAddress: string,
   ): Promise<{ paymentUrl: string; transactionId: string }> {
-    // 1. Verify cart (đã CHECKED_OUT)
     const cart = await this.cartRepo.findOne({
       where: {
         id: dto.cartId,

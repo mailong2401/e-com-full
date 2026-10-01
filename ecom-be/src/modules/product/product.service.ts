@@ -24,6 +24,15 @@ export interface PaginatedProducts {
     totalPages: number;
   };
 }
+export interface CursorPaginatedProducts {
+  data: Product[];
+  meta: {
+    paginationMode: 'cursor';
+    limit: number;
+    nextCursor: string | null;
+    hasNextPage: boolean;
+  };
+}
 
 @Injectable()
 export class ProductService {
@@ -96,7 +105,7 @@ export class ProductService {
   /**
    * List với filter, search, sort, pagination
    */
-  async findAll(query: QueryProductDto): Promise<PaginatedProducts> {
+  async findAll(query: QueryProductDto): Promise<CursorPaginatedProducts> {
     const {
       search,
       category,
@@ -106,12 +115,13 @@ export class ProductService {
       status,
       sortBy = ProductSortBy.CREATED_AT,
       order = 'DESC',
-      page = 1,
+      cursor,
       limit = 20,
     } = query;
 
     const qb = this.productRepository.createQueryBuilder('p');
 
+    // ============ FILTERS ============
     if (search) {
       qb.andWhere('(p.name ILIKE :search OR p.description ILIKE :search)', {
         search: `%${search}%`,
@@ -125,26 +135,67 @@ export class ProductService {
     if (maxPrice !== undefined)
       qb.andWhere('p.price <= :maxPrice', { maxPrice });
 
+    // ============ SORT ============
     const validSortFields = Object.values(ProductSortBy);
     const sortField = validSortFields.includes(sortBy)
       ? sortBy
       : ProductSortBy.CREATED_AT;
-    qb.orderBy(`p.${sortField}`, order === 'ASC' ? 'ASC' : 'DESC');
+    const sortDir = order === 'ASC' ? 'ASC' : 'DESC';
 
-    const skip = (page - 1) * limit;
-    qb.skip(skip).take(limit);
+    // ============ CURSOR LOGIC ============
+    const useCursor = sortField === ProductSortBy.CREATED_AT;
 
-    const [data, total] = await qb.getManyAndCount();
+    if (useCursor) {
+      // Cursor sort theo id (UUIDv7 = time-ordered)
+      qb.orderBy('p.id', sortDir);
 
-    return {
-      data,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+      if (cursor) {
+        // DESC (mới → cũ): id < cursor
+        // ASC  (cũ → mới): id > cursor
+        if (sortDir === 'DESC') {
+          qb.andWhere('p.id < :cursor', { cursor });
+        } else {
+          qb.andWhere('p.id > :cursor', { cursor });
+        }
+      }
+
+      // Lấy dư 1 để check còn trang sau không
+      qb.take(limit + 1);
+
+      const products = await qb.getMany();
+
+      const hasNextPage = products.length > limit;
+      if (hasNextPage) {
+        products.pop(); // bỏ item dư
+      }
+
+      const nextCursor =
+        hasNextPage && products.length > 0
+          ? products[products.length - 1].id
+          : null;
+
+      return {
+        data: products,
+        meta: {
+          paginationMode: 'cursor',
+          limit,
+          nextCursor,
+          hasNextPage,
+        },
+      };
+    }
+
+    // ============ FALLBACK: OFFSET (khi sort theo cột khác) ============
+    qb.orderBy(`p.${sortField}`, sortDir).addOrderBy('p.id', 'DESC'); // secondary sort để ổn định
+
+    // Không có page param nữa → dùng cursor như id
+    // Với trường hợp này, cursor = id của item cuối
+    // nhưng sort chính không phải id → phải dùng offset
+    // → Bạn có thể throw lỗi hoặc fallback default
+    throw new BadRequestException(
+      'Cursor pagination chỉ hỗ trợ sortBy=createdAt. ' +
+      'Với sortBy khác, vui lòng dùng endpoint khác.',
+    );
   }
 
   async findOne(id: string): Promise<Product> {
@@ -173,7 +224,6 @@ export class ProductService {
   async update(id: string, dto: UpdateProductDto): Promise<Product> {
     const product = await this.findOne(id);
 
-    // Validate salePrice nếu có
     const newPrice = dto.price ?? Number(product.price);
     const newSalePrice =
       dto.salePrice !== undefined ? dto.salePrice : product.salePrice;
@@ -181,7 +231,6 @@ export class ProductService {
       throw new BadRequestException('Sale price must be less than price');
     }
 
-    // Đổi slug nếu đổi tên
     if (dto.name && dto.name !== product.name) {
       const baseSlug = this.slugify(dto.name);
       product.slug = await this.ensureUniqueSlug(baseSlug, id);
@@ -201,9 +250,6 @@ export class ProductService {
     this.logger.log(`Product removed: ${id}`);
   }
 
-  /**
-   * Giảm stock khi đặt hàng (dùng cho Order module sau này)
-   */
   async decreaseStock(id: string, quantity: number): Promise<Product> {
     const product = await this.findOne(id);
 
@@ -218,18 +264,17 @@ export class ProductService {
       product.status = ProductStatus.OUT_OF_STOCK;
     }
 
+    await this.cache.del('product:${id}');
     return await this.productRepository.save(product);
   }
 
-  /**
-   * Tăng stock (hoàn hàng khi hủy đơn)
-   */
   async increaseStock(id: string, quantity: number): Promise<Product> {
     const product = await this.findOne(id);
     product.stock += quantity;
     if (product.stock > 0 && product.status === ProductStatus.OUT_OF_STOCK) {
       product.status = ProductStatus.ACTIVE;
     }
+    await this.cache.del('product:${id}');
     return await this.productRepository.save(product);
   }
 }
