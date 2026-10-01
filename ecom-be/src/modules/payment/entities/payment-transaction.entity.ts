@@ -4,19 +4,16 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { PaymentProvider, PaymentStatus } from '../constants/payment.constant';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
 @Entity('payment_transactions')
 @Index(['cartId'])
 @Index(['provider', 'providerTransactionId'], { unique: true })
 @Index(['status', 'createdAt'])
-export class PaymentTransaction {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class PaymentTransaction extends BaseEntity {
   @Column({ name: 'cart_id', type: 'uuid' })
   cartId!: string;
 

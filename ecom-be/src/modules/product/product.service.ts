@@ -13,6 +13,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
 import { ProductSortBy } from 'src/common/enums/product-sort-by.enum';
+import { CacheService } from 'src/common/utils/cache.util';
 
 export interface PaginatedProducts {
   data: Product[];
@@ -31,6 +32,7 @@ export class ProductService {
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    private readonly cache: CacheService,
   ) { }
 
   /**
@@ -146,10 +148,17 @@ export class ProductService {
   }
 
   async findOne(id: string): Promise<Product> {
+    const key = `product:${id}`;
+
+    const cached = await this.cache.get<Product>(key);
+    if (cached) return cached;
+
     const product = await this.productRepository.findOne({ where: { id } });
     if (!product) {
       throw new NotFoundException(`Product with ID "${id}" not found`);
     }
+
+    await this.cache.set(key, product, 300);
     return product;
   }
 
@@ -180,6 +189,7 @@ export class ProductService {
 
     Object.assign(product, dto);
     const saved = await this.productRepository.save(product);
+    await this.cache.del(`product:${id}`);
     this.logger.log(`Product updated: ${saved.id}`);
     return saved;
   }
@@ -187,6 +197,7 @@ export class ProductService {
   async remove(id: string): Promise<void> {
     const product = await this.findOne(id);
     await this.productRepository.remove(product);
+    await this.cache.del('product:${id}');
     this.logger.log(`Product removed: ${id}`);
   }
 

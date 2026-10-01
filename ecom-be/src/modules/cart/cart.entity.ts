@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { CartItem } from './cart-item.entity';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
 export enum CartStatus {
   ACTIVE = 'active',
@@ -26,10 +27,7 @@ export enum CartPaymentStatus {
 @Index(['userId'])
 @Index(['deviceId'])
 @Index(['status', 'updatedAt'])
-export class Cart {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Cart extends BaseEntity {
   @Column({ name: 'user_id', type: 'uuid', nullable: true })
   userId!: string | null;
 

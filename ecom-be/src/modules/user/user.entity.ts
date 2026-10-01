@@ -1,18 +1,10 @@
 // src/modules/user/user.entity.ts
+import { BaseEntity } from 'src/common/entities/base.entity';
 import { UserRole } from 'src/common/enums/user-role.enum';
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, CreateDateColumn, Entity, UpdateDateColumn } from 'typeorm';
 
 @Entity('users')
-export class User {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class User extends BaseEntity {
   @Column({ name: 'first_name', type: 'varchar', length: 100 })
   firstName!: string;
 
