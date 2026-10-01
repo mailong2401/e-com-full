@@ -11,7 +11,7 @@ export class CacheService {
     try {
       return JSON.parse(raw) as T;
     } catch {
-      return null; // cache hỏng → coi như miss
+      return null;
     }
   }
 
