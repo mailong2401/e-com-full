@@ -4,38 +4,25 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { ProductStatus } from 'src/common/enums/product-status.enum';
+import { BaseEntity } from 'src/common/entities/base.entity';
 
 @Entity('products')
 @Index(['status', 'createdAt'])
 @Index(['category'])
-export class Product {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
-
+export class Product extends BaseEntity {
   @Column({ name: 'name', type: 'varchar', length: 255 })
   name!: string;
 
-  @Column({
-    name: 'slug',
-    type: 'varchar',
-    length: 300,
-    unique: true,
-  })
+  @Column({ name: 'slug', type: 'varchar', length: 300, unique: true })
   slug!: string;
 
   @Column({ name: 'description', type: 'text', nullable: true })
   description!: string | null;
 
-  @Column({
-    name: 'price',
-    type: 'decimal',
-    precision: 12,
-    scale: 2,
-  })
+  @Column({ name: 'price', type: 'decimal', precision: 12, scale: 2 })
   price!: number;
 
   @Column({
@@ -56,11 +43,7 @@ export class Product {
   @Column({ name: 'brand', type: 'varchar', length: 100, nullable: true })
   brand!: string | null;
 
-  @Column({
-    name: 'images',
-    type: 'jsonb',
-    default: () => "'[]'::jsonb",
-  })
+  @Column({ name: 'images', type: 'jsonb', default: () => "'[]'::jsonb" })
   images!: string[];
 
   @Column({
