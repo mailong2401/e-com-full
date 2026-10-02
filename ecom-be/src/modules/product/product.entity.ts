@@ -66,6 +66,19 @@ export class Product extends BaseEntity {
   @Column({ name: 'review_count', type: 'int', default: 0 })
   reviewCount!: number;
 
+  // Cột search_vector do PostgreSQL tự sinh
+  // select: false → không trả về trong query thông thường (tiết kiệm băng thông)
+  // insert/update: false → TypeORM không bao giờ ghi vào cột này
+  @Column({
+    name: 'search_vector',
+    type: 'tsvector',
+    select: false,
+    insert: false,
+    update: false,
+    nullable: true,
+  })
+  searchVector?: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

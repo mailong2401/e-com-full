@@ -126,8 +126,9 @@ export class ProductService {
       limit = 20,
     } = query;
 
+    const hasSearch = !!search && search.trim().length > 0;
+
     // ==================== OFFSET MODE ====================
-    // Offset hỗ trợ MỌI sortBy
     if (paginationMode === PaginationMode.OFFSET) {
       const qb = this.productRepository.createQueryBuilder('p');
       this.applyFilters(qb, {
@@ -139,15 +140,28 @@ export class ProductService {
         status,
       });
 
-      const sortField = Object.values(ProductSortBy).includes(sortBy)
-        ? sortBy
-        : ProductSortBy.CREATED_AT;
-      const sortDir = order === 'ASC' ? 'ASC' : 'DESC';
+      // Nếu có search → ưu tiên rank, sau đó mới đến sortBy
+      if (hasSearch) {
+        qb.addSelect(
+          `ts_rank(p.search_vector, websearch_to_tsquery('simple', immutable_unaccent(:rankQuery)))`,
+          'rank',
+        ).setParameter('rankQuery', search.trim());
+        qb.orderBy('rank', 'DESC');
+        // Secondary sort để stable
+        const sortField = Object.values(ProductSortBy).includes(sortBy)
+          ? sortBy
+          : ProductSortBy.CREATED_AT;
+        const sortDir = order === 'ASC' ? 'ASC' : 'DESC';
+        qb.addOrderBy(`p.${sortField}`, sortDir).addOrderBy('p.id', 'DESC');
+      } else {
+        const sortField = Object.values(ProductSortBy).includes(sortBy)
+          ? sortBy
+          : ProductSortBy.CREATED_AT;
+        const sortDir = order === 'ASC' ? 'ASC' : 'DESC';
+        qb.orderBy(`p.${sortField}`, sortDir).addOrderBy('p.id', 'DESC');
+      }
 
-      qb.orderBy(`p.${sortField}`, sortDir)
-        .addOrderBy('p.id', 'DESC') // secondary sort để ổn định
-        .skip((page - 1) * limit)
-        .take(limit);
+      qb.skip((page - 1) * limit).take(limit);
 
       const [data, total] = await qb.getManyAndCount();
 
@@ -164,7 +178,14 @@ export class ProductService {
     }
 
     // ==================== CURSOR MODE ====================
-    // Cursor CHỈ hỗ trợ sortBy = createdAt (vì dùng id UUIDv7 time-ordered)
+    // Cursor mode + search → không dùng rank được vì rank không ổn định giữa các page
+    // Khuyến nghị: dùng offset mode khi có search
+    if (hasSearch) {
+      throw new BadRequestException(
+        'Cursor pagination không hỗ trợ search. Dùng paginationMode=offset.',
+      );
+    }
+
     if (sortBy !== ProductSortBy.CREATED_AT) {
       throw new BadRequestException(
         'Cursor pagination chỉ hỗ trợ sortBy=createdAt. ' +
@@ -193,8 +214,7 @@ export class ProductService {
       }
     }
 
-    qb.take(limit + 1); // lấy dư 1 để check hasNextPage
-
+    qb.take(limit + 1);
     const products = await qb.getMany();
     const hasNextPage = products.length > limit;
     if (hasNextPage) products.pop();
@@ -214,7 +234,6 @@ export class ProductService {
       },
     };
   }
-
   // Helper: apply filters dùng chung cho cả 2 mode
   private applyFilters(
     qb: SelectQueryBuilder<Product>,
@@ -227,11 +246,14 @@ export class ProductService {
       status?: ProductStatus;
     },
   ): void {
-    if (f.search) {
-      qb.andWhere('(p.name ILIKE :search OR p.description ILIKE :search)', {
-        search: `%${f.search}%`,
-      });
+    // ===== FTS: dùng websearch_to_tsquery để hỗ trợ cú pháp tự nhiên =====
+    if (f.search && f.search.trim().length > 0) {
+      qb.andWhere(
+        `p.search_vector @@ websearch_to_tsquery('simple', immutable_unaccent(:search))`,
+        { search: f.search.trim() },
+      );
     }
+
     if (f.category)
       qb.andWhere('p.category = :category', { category: f.category });
     if (f.brand) qb.andWhere('p.brand = :brand', { brand: f.brand });
@@ -240,6 +262,45 @@ export class ProductService {
       qb.andWhere('p.price >= :minPrice', { minPrice: f.minPrice });
     if (f.maxPrice !== undefined)
       qb.andWhere('p.price <= :maxPrice', { maxPrice: f.maxPrice });
+  }
+
+  /**
+   * Search chuyên dụng với ranking và highlight
+   */
+  async searchWithRank(query: string, limit = 20) {
+    if (!query || query.trim().length === 0) {
+      return { data: [], total: 0 };
+    }
+
+    const qb = this.productRepository
+      .createQueryBuilder('p')
+      .addSelect(
+        `ts_rank(p.search_vector, websearch_to_tsquery('simple', immutable_unaccent(:q)))`,
+        'rank',
+      )
+      .addSelect(
+        `ts_headline('simple', immutable_unaccent(p.name), websearch_to_tsquery('simple', immutable_unaccent(:q)), 'StartSel=<mark>, StopSel=</mark>, MaxWords=20')`,
+        'highlight',
+      )
+      .where(
+        `p.search_vector @@ websearch_to_tsquery('simple', immutable_unaccent(:q))`,
+        { q: query.trim() },
+      )
+      .andWhere('p.status = :status', { status: ProductStatus.ACTIVE })
+      .orderBy('rank', 'DESC')
+      .addOrderBy('p.created_at', 'DESC')
+      .take(limit);
+
+    const { entities, raw } = await qb.getRawAndEntities();
+
+    // Gắn rank và highlight vào entity
+    const data = entities.map((product, idx) => ({
+      ...product,
+      rank: parseFloat(raw[idx].rank),
+      highlight: raw[idx].highlight,
+    }));
+
+    return { data, total: data.length };
   }
 
   async findOne(id: string): Promise<Product> {

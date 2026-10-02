@@ -81,6 +81,16 @@ export class ProductController {
   }
 
   /**
+   * Search với FTS + ranking
+   * GET /products/search?q=ao+thun&limit=20
+   */
+  @Get('search')
+  @Throttle({ default: { ttl: 60_000, limit: 100 } })
+  async search(@Query('q') q: string, @Query('limit') limit?: number) {
+    return await this.productService.searchWithRank(q, limit ? +limit : 20);
+  }
+
+  /**
    * Admin update sản phẩm
    * Rate limit: 30 lần / phút
    */
